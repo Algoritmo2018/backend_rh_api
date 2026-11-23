@@ -1,0 +1,46 @@
+# Production. Every value comes from environment variables (see .env.example).
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS:true}
+
+server:
+  # "framework" only behind a trusted proxy that overwrites X-Forwarded-For (see README)
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
+
+management:
+  endpoint:
+    health:
+      # Never expose component details (database, disk…) in production
+      show-details: never
+
+app:
+  frontend-url: ${APP_FRONTEND_URL}
+  candidate-portal-url: ${APP_CANDIDATE_PORTAL_URL}
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
+  jwt:
+    secret: ${APP_JWT_SECRET}
+  auth:
+    token-pepper: ${APP_AUTH_TOKEN_PEPPER}
+    otp-login-enabled: ${APP_AUTH_OTP_LOGIN_ENABLED:false}
+  mail:
+    from: ${APP_MAIL_FROM}
+  storage:
+    local:
+      # Until stage 6 (S3/MinIO): a persistent volume
+      root: ${APP_STORAGE_LOCAL_ROOT:/var/lib/recrutamento-api/uploads}
+  bootstrap:
+    admin:
+      email: ${APP_BOOTSTRAP_ADMIN_EMAIL:}
+      name: ${APP_BOOTSTRAP_ADMIN_NAME:}
+      phone: ${APP_BOOTSTRAP_ADMIN_PHONE:}

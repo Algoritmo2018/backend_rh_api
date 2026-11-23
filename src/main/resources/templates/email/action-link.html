@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-AO">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${email.subject}">Assunto</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5fa;font-family:Arial,Helvetica,sans-serif;color:#1f2547;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f4f5fa;padding:24px 0;">
+    <tr>
+        <td align="center">
+            <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
+                <tr>
+                    <td style="background-color:#456fa3;padding:20px 32px;color:#ffffff;font-size:20px;font-weight:bold;letter-spacing:0.5px;"
+                        th:text="#{email.layout.brand}">FEH OIRAM</td>
+                </tr>
+                <tr>
+                    <td style="padding:32px;font-size:15px;line-height:1.6;">
+                        <p style="margin:0 0 16px;" th:text="${email.greeting}">Olá,</p>
+                        <p style="margin:0 0 24px;" th:text="${email.body}">Texto</p>
+                        <p style="margin:0 0 24px;">
+                            <a th:href="${email.actionUrl}" th:text="${email.actionLabel}"
+                               style="display:inline-block;background-color:#2f7d94;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">Ação</a>
+                        </p>
+                        <p style="margin:0 0 16px;color:#5a607f;font-size:13px;" th:text="${email.note}">Nota</p>
+                        <p style="margin:0 0 4px;color:#5a607f;font-size:13px;" th:text="#{email.layout.link-fallback}">Se o botão não funcionar…</p>
+                        <p style="margin:0 0 24px;font-size:13px;word-break:break-all;"><a th:href="${email.actionUrl}" th:text="${email.actionUrl}" style="color:#2f7d94;">link</a></p>
+                        <p style="margin:0;" th:text="#{email.layout.signature}">Equipa</p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="background-color:#f4f5fa;padding:16px 32px;color:#8a8fa8;font-size:12px;line-height:1.5;"
+                        th:text="#{email.layout.footer}">Rodapé</td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

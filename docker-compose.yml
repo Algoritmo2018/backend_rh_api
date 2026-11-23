@@ -1,0 +1,30 @@
+# Local infrastructure for development.
+# Values come from .env (copy .env.example); the defaults below are for local use only.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-recrutamento}
+      POSTGRES_USER: ${POSTGRES_USER:-recrutamento}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recrutamento}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.34
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+    labels:
+      # Not a service Spring Boot can connect to automatically
+      org.springframework.boot.ignore: "true"
+
+volumes:
+  postgres-data:

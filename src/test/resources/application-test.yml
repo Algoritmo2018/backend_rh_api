@@ -1,0 +1,39 @@
+# Integration tests (Testcontainers provides PostgreSQL through @ServiceConnection and Mailpit
+# through a DynamicPropertyRegistrar, see TestcontainersConfiguration)
+spring:
+  mail:
+    # Placeholders so the mail auto-configuration is enabled; the real host/port of the Mailpit
+    # container are set by TestcontainersConfiguration (DynamicPropertyRegistrar)
+    host: localhost
+    port: 1025
+  flyway:
+    # Test-only tables (see db/test-migration)
+    locations: classpath:db/migration,classpath:db/test-migration
+
+app:
+  frontend-url: http://localhost:5173/software_rh
+  candidate-portal-url: http://localhost:5173/software_rh/candidato
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    secret: test-only-jwt-secret-0123456789abcdef-0123
+  auth:
+    otp-login-enabled: true
+    rate-limits:
+      # Lower than production (100 and 30) only so the per-IP tests stay fast: every login attempt
+      # hashes a password. The other limits keep their production values.
+      login: { max: 20, window: 15m }
+      register: { max: 5, window: 1h }
+    token-pepper: test-only-token-pepper-0123456789abcdef
+  mail:
+    from: FEH OIRAM <nao-responder@fehoiram.test>
+  storage:
+    local:
+      root: ${java.io.tmpdir}/recrutamento-api-test-uploads
+  notifications:
+    allow-simulated-sms: true
+  bootstrap:
+    admin:
+      email: bootstrap-admin@fehoiram.test
+      name: Administrador Inicial
+      phone: "929999999"

@@ -1,0 +1,46 @@
+# Local development. Values here are for a local machine only.
+spring:
+  docker:
+    compose:
+      enabled: true
+      # Starts the containers if needed and leaves them running on shutdown
+      lifecycle-management: start-only
+  datasource:
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:recrutamento}
+    username: ${POSTGRES_USER:recrutamento}
+    password: ${POSTGRES_PASSWORD:recrutamento}
+  mail:
+    # Mailpit (docker compose): web inbox at http://localhost:8025
+    host: localhost
+    port: 1025
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+app:
+  frontend-url: http://localhost:5173/software_rh
+  candidate-portal-url: http://localhost:5173/software_rh/candidato
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    # Development-only key (HS256 needs at least 32 bytes). Never use it outside a local machine.
+    secret: dev-only-jwt-secret-change-me-0123456789abcdef
+  auth:
+    otp-login-enabled: true
+    otp-login-roles: [candidate, admin, recruiter, interviewer, client]
+    # Development-only key for hashing SMS codes
+    token-pepper: dev-only-token-pepper-change-me-0123456789
+  mail:
+    from: FEH OIRAM <nao-responder@fehoiram.local>
+  notifications:
+    allow-simulated-sms: true
+    log-message-content: true
+  bootstrap:
+    admin:
+      # First administrator, created on startup if there is none (invitation goes to Mailpit)
+      email: admin@fehoiram.local
+      name: Administrador Local
+      phone: "923000000"

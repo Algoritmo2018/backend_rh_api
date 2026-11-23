@@ -1,0 +1,12 @@
+[(${email.greeting})]
+
+[(${email.body})]
+
+[(${email.actionLabel})]: [(${email.actionUrl})]
+
+[(${email.note})]
+
+[(#{email.layout.signature})]
+
+--
+[(#{email.layout.footer})]
