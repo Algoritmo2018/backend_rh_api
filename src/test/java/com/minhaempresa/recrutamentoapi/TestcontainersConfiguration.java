@@ -28,6 +28,9 @@ public class TestcontainersConfiguration {
     GenericContainer<?> mailpitContainer() {
         return new GenericContainer<>(DockerImageName.parse(MAILPIT_IMAGE))
                 .withExposedPorts(MAILPIT_SMTP_PORT, MAILPIT_HTTP_PORT)
+                // Keep every message (default: only the newest 500). Emails "to every administrator"
+                // reach all admins created by earlier tests, and none may be pruned before it is read.
+                .withEnv("MP_MAX_MESSAGES", "0")
                 .waitingFor(Wait.forHttp("/api/v1/info").forPort(MAILPIT_HTTP_PORT));
     }
 

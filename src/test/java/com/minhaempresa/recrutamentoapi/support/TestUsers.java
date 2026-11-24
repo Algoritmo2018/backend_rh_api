@@ -8,6 +8,7 @@ import com.minhaempresa.recrutamentoapi.user.service.UserService;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
@@ -25,12 +26,14 @@ public class TestUsers {
     private final UserRepository repository;
     private final UserService userService;
     private final AccessTokenService accessTokens;
+    private final JdbcTemplate jdbc;
     private final String passwordHash;
 
-    public TestUsers(UserRepository repository, UserService userService, AccessTokenService accessTokens, PasswordEncoder passwordEncoder) {
+    public TestUsers(UserRepository repository, UserService userService, AccessTokenService accessTokens, PasswordEncoder passwordEncoder, JdbcTemplate jdbc) {
         this.repository = repository;
         this.userService = userService;
         this.accessTokens = accessTokens;
+        this.jdbc = jdbc;
         // BCrypt is deliberately slow: hash once and reuse
         this.passwordHash = passwordEncoder.encode(PASSWORD);
     }
@@ -51,10 +54,41 @@ public class TestUsers {
             user.changePassword(passwordHash);
         }
         if (role == UserRole.CLIENT) {
-            user.setClientId(UUID.randomUUID());
+            user.setClientId(createClient());
         }
         repository.save(user);
         return new TestUser(user.getId(), email, phone, role);
+    }
+
+    /** A client-portal user (with password) of the given company. */
+    public TestUser createClientUser(UUID clientId) {
+        int n = SEQUENCE.incrementAndGet();
+        String email = "client-" + n + "-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.ao";
+        String phone = "+244" + uniqueLocalPhone();
+        User user = new User("Cliente Teste " + n, email, phone, UserRole.CLIENT);
+        user.changePassword(passwordHash);
+        user.setClientId(clientId);
+        repository.save(user);
+        return new TestUser(user.getId(), email, phone, UserRole.CLIENT);
+    }
+
+    /** An active client company (no contacts), with a unique NIF. */
+    public UUID createClient() {
+        return createClient("Empresa Teste " + SEQUENCE.incrementAndGet(), true);
+    }
+
+    public UUID createClient(String name, boolean active) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO clients (id, name, sector, nif, province, city, address, status, created_at, updated_at)
+                VALUES (?, ?, 'SERVICES', ?, 'LUANDA', 'Luanda', 'Rua Teste, 1', ?, now(), now())""",
+                id, name, uniqueNif(), active ? "ACTIVE" : "INACTIVE");
+        return id;
+    }
+
+    /** A NIF (12 digits) not used by any other test. */
+    public static String uniqueNif() {
+        return "5" + "%011d".formatted(SEQUENCE.incrementAndGet() * 1000L + ThreadLocalRandom.current().nextInt(1000));
     }
 
     /** Access token for the user, as if issued at login (new session id). */

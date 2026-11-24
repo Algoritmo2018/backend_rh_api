@@ -1,6 +1,7 @@
 package com.minhaempresa.recrutamentoapi.shared.web;
 
 import com.minhaempresa.recrutamentoapi.shared.config.AppProperties;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -37,6 +38,31 @@ public class FrontendLinks {
     /** Pending frontend route (integration stage). */
     public String emailVerification(String token) {
         return withToken("/confirmar-email", token);
+    }
+
+    /** Client list of the internal panel. */
+    public String clients() {
+        return builder("/app/clientes").toUriString();
+    }
+
+    /** Client detail, tab "Pedidos" (job requests). */
+    public String clientJobRequests(UUID clientId) {
+        return builder("/app/clientes/{id}").queryParam("separador", "pedidos").buildAndExpand(clientId).toUriString();
+    }
+
+    /** Client portal page with the form and the list of job requests. */
+    public String clientPortalJobRequests() {
+        return builder("/cliente/pedir-vaga").toUriString();
+    }
+
+    /** Pipeline (kanban) of a job in the internal panel (administrators and recruiters). */
+    public String job(UUID jobId) {
+        return builder("/app/vagas/{id}").buildAndExpand(jobId).toUriString();
+    }
+
+    /** Interview agenda of the internal panel (every staff role). */
+    public String interviews() {
+        return builder("/app/entrevistas").toUriString();
     }
 
     /** The token is a URI variable, so it is strictly encoded (any reserved character is escaped). */

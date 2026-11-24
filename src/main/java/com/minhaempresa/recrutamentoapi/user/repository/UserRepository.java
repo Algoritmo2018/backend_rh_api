@@ -28,5 +28,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     List<User> findByRole(UserRole role);
 
+    List<User> findByClientId(UUID clientId);
+
     List<User> findByRoleIn(Collection<UserRole> roles, Sort sort);
 }

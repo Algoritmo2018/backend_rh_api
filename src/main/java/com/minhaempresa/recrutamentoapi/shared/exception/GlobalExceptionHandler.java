@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -62,6 +63,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex, WebRequest request) {
         return respond(HttpStatus.FORBIDDEN, ApiErrorType.FORBIDDEN_ERROR, "error.forbidden", List.of(), request);
+    }
+
+    /**
+     * Someone else saved the same record in between (JPA {@code @Version}): 409, the client must reload.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> handleOptimisticLock(OptimisticLockingFailureException ex, WebRequest request) {
+        return respond(HttpStatus.CONFLICT, ApiErrorType.VALIDATION_ERROR, "error.concurrent-update", List.of(), request);
     }
 
     @ExceptionHandler(AuthenticationException.class)

@@ -6,6 +6,7 @@ import com.minhaempresa.recrutamentoapi.auth.service.AuthProperties;
 import com.minhaempresa.recrutamentoapi.auth.service.OneTimeTokenService;
 import com.minhaempresa.recrutamentoapi.auth.service.RateLimiter;
 import com.minhaempresa.recrutamentoapi.auth.service.RefreshTokenService;
+import com.minhaempresa.recrutamentoapi.client.service.ClientService;
 import com.minhaempresa.recrutamentoapi.notification.sender.NotificationChannel;
 import com.minhaempresa.recrutamentoapi.notification.sender.NotificationDispatcher;
 import com.minhaempresa.recrutamentoapi.shared.domain.PhoneNumbers;
@@ -35,13 +36,16 @@ import com.minhaempresa.recrutamentoapi.user.repository.UserRepository;
 import com.minhaempresa.recrutamentoapi.user.repository.UserSpecifications;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -73,6 +77,7 @@ public class UserService {
     private final RateLimiter rateLimiter;
     private final NotificationDispatcher notifications;
     private final AuthProperties authProperties;
+    private final ClientService clientService;
     private final ApplicationEventPublisher events;
     private final Clock clock;
 
@@ -105,6 +110,9 @@ public class UserService {
     public UserResponse create(UserCreateRequest request) {
         requireManagedRole(request.role());
         requireClientForClientRole(request.role(), request.clientId());
+        if (request.role() == UserRole.CLIENT) {
+            requireActiveClient(request.clientId());
+        }
         String email = normalizeEmail(request.email());
         if (repository.existsByEmail(email)) {
             throw new ConflictException("user.email-taken", List.of(new FieldError("email", "user.email-taken")));
@@ -142,6 +150,9 @@ public class UserService {
         requirePhoneAvailable(phone, user.getId());
 
         UUID clientId = request.role() == UserRole.CLIENT ? request.clientId() : null;
+        if (clientId != null && !clientId.equals(user.getClientId())) {
+            requireActiveClient(clientId);
+        }
         boolean claimsChanged = request.role() != user.getRole() || !Objects.equals(clientId, user.getClientId());
         user.setName(request.name().trim());
         user.setPhone(phone);
@@ -293,17 +304,17 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public Optional<UserCredentials> findCredentialsByEmail(String email) {
-        return repository.findByEmail(normalizeEmail(email)).map(mapper::toCredentials);
+        return repository.findByEmail(normalizeEmail(email)).map(this::credentials);
     }
 
     @Transactional(readOnly = true)
     public Optional<UserCredentials> findCredentialsByPhone(String phone) {
-        return PhoneNumbers.normalize(phone).flatMap(repository::findByPhone).map(mapper::toCredentials);
+        return PhoneNumbers.normalize(phone).flatMap(repository::findByPhone).map(this::credentials);
     }
 
     @Transactional(readOnly = true)
     public UserCredentials getCredentials(UUID id) {
-        return mapper.toCredentials(find(id));
+        return credentials(find(id));
     }
 
     @Transactional
@@ -345,6 +356,52 @@ public class UserService {
     @Transactional
     public void markEmailVerified(UUID id) {
         find(id).markEmailVerified(clock.instant());
+    }
+
+    // =====================================================================================
+    // Support for other modules (never exposed by a controller)
+    // =====================================================================================
+
+    /** Names of the given users (missing ids are absent). */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> namesOf(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(Set.copyOf(ids)).stream().collect(Collectors.toMap(User::getId, User::getName));
+    }
+
+    /** Name, role and active flag of the given users (missing ids are absent). */
+    @Transactional(readOnly = true)
+    public Map<UUID, UserReference> referencesOf(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(Set.copyOf(ids)).stream()
+                .collect(Collectors.toMap(User::getId, u -> new UserReference(u.getId(), u.getName(), u.getRole(), u.isActive())));
+    }
+
+    /** Active administrators (they receive the emails about new requests). */
+    @Transactional(readOnly = true)
+    public List<UserContact> activeAdministrators() {
+        return repository.findByRole(UserRole.ADMIN).stream()
+                .filter(User::isActive)
+                .map(u -> new UserContact(u.getId(), u.getName(), u.getEmail()))
+                .toList();
+    }
+
+    /** Contact of a user who can still log in (for client users: with an active company). */
+    @Transactional(readOnly = true)
+    public Optional<UserContact> findActiveContact(UUID id) {
+        return repository.findById(id)
+                .filter(u -> credentials(u).active())
+                .map(u -> new UserContact(u.getId(), u.getName(), u.getEmail()));
+    }
+
+    /** Ends every session of the portal users of a deactivated client company. */
+    @Transactional
+    public void revokeSessionsOfClient(UUID clientId) {
+        repository.findByClientId(clientId).forEach(u -> refreshTokens.revokeAllSessions(u.getId()));
     }
 
     // =====================================================================================
@@ -407,6 +464,25 @@ public class UserService {
 
     private void publishAlert(User user, SecurityAlertEvent.Kind kind) {
         events.publishEvent(new SecurityAlertEvent(user.getEmail(), user.getName(), kind, clock.instant()));
+    }
+
+    /**
+     * Login view of the account. A client user of an inactive company counts as inactive (no login,
+     * no refresh, no password reset) without changing the user's own flag, so reactivating the company
+     * gives access back to the users that were not deactivated individually.
+     */
+    private UserCredentials credentials(User user) {
+        UserCredentials credentials = mapper.toCredentials(user);
+        if (credentials.active() && user.getRole() == UserRole.CLIENT && !clientService.isActive(user.getClientId())) {
+            return credentials.asInactive();
+        }
+        return credentials;
+    }
+
+    private void requireActiveClient(UUID clientId) {
+        if (!clientService.isActive(clientId)) {
+            throw new BusinessException("user.client-inactive", List.of(new FieldError("clientId", "user.client-inactive")));
+        }
     }
 
     private void invite(User user) {

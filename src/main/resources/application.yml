@@ -124,6 +124,11 @@ app:
       register-per-identity: { max: 3, window: 1h }
       # Per user: checks of the current password (change password, disable 2FA, change phone)
       password-confirmation: { max: 10, window: 15m }
+  contact:
+    # Public forms "Precisa de recrutar?" and Contacto (CGNAT: per-IP generous, per-email strict)
+    rate-limits:
+      per-ip: { max: 20, window: 1h }
+      per-email: { max: 3, window: 1h }
   storage:
     local:
       # Uploaded files (local disk until the S3 implementation in stage 6)

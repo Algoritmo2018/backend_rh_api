@@ -9,10 +9,13 @@ import com.minhaempresa.recrutamentoapi.shared.config.CacheNames;
 import com.minhaempresa.recrutamentoapi.shared.exception.ApiException.FieldError;
 import com.minhaempresa.recrutamentoapi.shared.exception.ConflictException;
 import com.minhaempresa.recrutamentoapi.shared.exception.NotFoundException;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -46,6 +49,15 @@ public class TagService {
             contributor.countByTag().forEach((tagId, count) -> usage.computeIfPresent(tagId, (id, total) -> total + count));
         }
         return usage;
+    }
+
+    /** Which of the given ids are existing tags (used to validate tags sent by other modules). */
+    @Transactional(readOnly = true)
+    public Set<UUID> existingIds(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return Set.of();
+        }
+        return repository.findAllById(Set.copyOf(ids)).stream().map(Tag::getId).collect(Collectors.toSet());
     }
 
     @Transactional

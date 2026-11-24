@@ -25,6 +25,11 @@ app:
       login: { max: 20, window: 15m }
       register: { max: 5, window: 1h }
     token-pepper: test-only-token-pepper-0123456789abcdef
+  contact:
+    rate-limits:
+      # Lower than production (20) so the per-IP test stays short; per email keeps its value (3)
+      per-ip: { max: 5, window: 1h }
+      per-email: { max: 3, window: 1h }
   mail:
     from: FEH OIRAM <nao-responder@fehoiram.test>
   storage:

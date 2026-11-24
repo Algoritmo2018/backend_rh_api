@@ -147,8 +147,31 @@ class UserManagementIntegrationTest {
                     .andExpect(jsonPath("$.errors[0].message").value("Escolha a empresa cliente."));
 
             Map<String, Object> withClient = newUser("client");
-            withClient.put("clientId", UUID.randomUUID().toString());
-            api.sendJson("POST", "/api/v1/users", users.accessToken(admin), withClient).andExpect(status().isCreated());
+            withClient.put("clientId", users.createClient().toString());
+            api.sendJson("POST", "/api/v1/users", users.accessToken(admin), withClient)
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.clientId").value(withClient.get("clientId")));
+        }
+
+        @Test
+        void clientUsersNeedAnExistingActiveCompany() throws Exception {
+            for (String clientId : new String[] {UUID.randomUUID().toString(), users.createClient("Empresa Inativa", false).toString()}) {
+                Map<String, Object> body = newUser("client");
+                body.put("clientId", clientId);
+                api.sendJson("POST", "/api/v1/users", users.accessToken(admin), body)
+                        .andExpect(status().isUnprocessableContent())
+                        .andExpect(jsonPath("$.errors[0].field").value("clientId"))
+                        .andExpect(jsonPath("$.errors[0].message").value("Escolha uma empresa cliente ativa."));
+            }
+
+            // Moving an existing client user to an inactive company is refused too
+            TestUser clientUser = users.create(UserRole.CLIENT);
+            Map<String, Object> move = newUser("client");
+            move.put("email", clientUser.email());
+            move.put("clientId", users.createClient("Outra Inativa", false).toString());
+            api.sendJson("PUT", "/api/v1/users/" + clientUser.id(), users.accessToken(admin), move)
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.errors[0].field").value("clientId"));
         }
 
         @Test

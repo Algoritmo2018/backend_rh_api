@@ -30,8 +30,25 @@ public class MutableClock extends Clock {
         return ZoneOffset.UTC;
     }
 
+    /** Same moving instant, seen in another zone (so "today in Luanda" is really computed in Luanda). */
     @Override
     public Clock withZone(ZoneId zone) {
-        return this;
+        MutableClock source = this;
+        return new Clock() {
+            @Override
+            public Instant instant() {
+                return source.instant();
+            }
+
+            @Override
+            public ZoneId getZone() {
+                return zone;
+            }
+
+            @Override
+            public Clock withZone(ZoneId other) {
+                return source.withZone(other);
+            }
+        };
     }
 }

@@ -21,6 +21,11 @@ public record UserCredentials(
         UUID clientId,
         UUID candidateId) {
 
+    /** Same credentials, but inactive (e.g. a client user of an inactive company). */
+    public UserCredentials asInactive() {
+        return new UserCredentials(id, name, email, phone, role, passwordHash, false, twoFactorEnabled, lockedUntil, clientId, candidateId);
+    }
+
     public boolean hasPassword() {
         return passwordHash != null;
     }

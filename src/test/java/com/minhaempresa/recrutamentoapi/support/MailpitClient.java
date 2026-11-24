@@ -23,6 +23,14 @@ public class MailpitClient {
         this.http = RestClient.create(baseUrl);
     }
 
+    /**
+     * Deletes every captured email. Call it at the start of a test that checks emails, and still look
+     * only at the addresses that test created (emails of earlier tests may arrive late).
+     */
+    public void deleteAll() {
+        http.delete().uri("/api/v1/messages").retrieve().toBodilessEntity();
+    }
+
     /** An email as stored by Mailpit. */
     public record Email(String id, String subject, String text, String html) {
 
