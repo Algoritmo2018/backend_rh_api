@@ -3,6 +3,7 @@ package com.minhaempresa.recrutamentoapi.job.service;
 import com.minhaempresa.recrutamentoapi.client.service.ClientService;
 import com.minhaempresa.recrutamentoapi.job.dto.request.PublicJobQuery;
 import com.minhaempresa.recrutamentoapi.job.dto.request.PublicJobSort;
+import com.minhaempresa.recrutamentoapi.job.dto.response.MatchableJobResponse;
 import com.minhaempresa.recrutamentoapi.job.dto.response.PublicJobResponse;
 import com.minhaempresa.recrutamentoapi.job.entity.Job;
 import com.minhaempresa.recrutamentoapi.job.mapper.JobMapper;
@@ -47,6 +48,7 @@ public class PublicJobService {
     /** Words of the search: letters and digits only, so the {@code to_tsquery} text is always valid. */
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]+");
     private static final int MAX_SEARCH_WORDS = 8;
+    private static final int MATCHABLE_LIMIT = 200;
 
     private final JobRepository repository;
     private final JobMapper mapper;
@@ -100,6 +102,21 @@ public class PublicJobService {
                 .sorted(Comparator.comparing(JobRepository.AreaCount::getArea))
                 .forEach(c -> counts.put(c.getArea().getValue(), c.getTotal()));
         return Map.copyOf(counts);
+    }
+
+    /**
+     * The most recent visible jobs (at most {@value #MATCHABLE_LIMIT}) with their full requirements, for
+     * the match score of recommended jobs. Never returned as such to a candidate.
+     */
+    @Transactional(readOnly = true)
+    public List<MatchableJobResponse> matchableJobs() {
+        List<Job> jobs = repository.findVisible(today(), PageRequest.ofSize(MATCHABLE_LIMIT));
+        List<PublicJobResponse> visible = toPublic(jobs);
+        List<MatchableJobResponse> result = new ArrayList<>();
+        for (int i = 0; i < jobs.size(); i++) {
+            result.add(new MatchableJobResponse(visible.get(i), jobs.get(i).getRequirements().stream().map(mapper::toRequirementResponse).toList()));
+        }
+        return result;
     }
 
     /** A visible job by slug; anything else (draft, paused, closed, deadline passed) → 404. */

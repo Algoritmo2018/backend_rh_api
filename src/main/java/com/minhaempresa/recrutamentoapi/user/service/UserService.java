@@ -28,6 +28,7 @@ import com.minhaempresa.recrutamentoapi.user.dto.response.UserResponse;
 import com.minhaempresa.recrutamentoapi.user.dto.response.UserSummaryResponse;
 import com.minhaempresa.recrutamentoapi.user.entity.User;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
+import com.minhaempresa.recrutamentoapi.user.event.CandidateEmailVerifiedEvent;
 import com.minhaempresa.recrutamentoapi.user.event.CandidateUserRegisteredEvent;
 import com.minhaempresa.recrutamentoapi.user.event.SecurityAlertEvent;
 import com.minhaempresa.recrutamentoapi.user.event.UserInvitedEvent;
@@ -352,15 +353,37 @@ public class UserService {
         find(id).changePassword(passwordEncoder.encode(rawPassword));
     }
 
-    /** Following a link sent to the address proves the user owns it. */
+    /**
+     * Following a link sent to the address proves the user owns it. For a candidate without a profile
+     * yet, {@link CandidateEmailVerifiedEvent} lets the candidates module create or link it in this
+     * transaction.
+     */
     @Transactional
     public void markEmailVerified(UUID id) {
-        find(id).markEmailVerified(clock.instant());
+        User user = find(id);
+        user.markEmailVerified(clock.instant());
+        if (user.getRole() == UserRole.CANDIDATE && user.getCandidateId() == null) {
+            events.publishEvent(new CandidateEmailVerifiedEvent(user.getId(), user.getEmail(), user.getName(), user.getPhone()));
+        }
     }
 
     // =====================================================================================
     // Support for other modules (never exposed by a controller)
     // =====================================================================================
+
+    /** The account of a candidate user ({@code empty} for other roles or unknown ids). */
+    @Transactional(readOnly = true)
+    public Optional<CandidateAccount> findCandidateAccount(UUID userId) {
+        return repository.findById(userId)
+                .filter(u -> u.getRole() == UserRole.CANDIDATE)
+                .map(u -> new CandidateAccount(u.getId(), u.getName(), u.getEmail(), u.getPhone(), u.getEmailVerifiedAt() != null, u.getCandidateId()));
+    }
+
+    /** Links the candidate profile to its account (the access token carries it from the next refresh). */
+    @Transactional
+    public void linkCandidate(UUID userId, UUID candidateId) {
+        find(userId).setCandidateId(candidateId);
+    }
 
     /** Names of the given users (missing ids are absent). */
     @Transactional(readOnly = true)

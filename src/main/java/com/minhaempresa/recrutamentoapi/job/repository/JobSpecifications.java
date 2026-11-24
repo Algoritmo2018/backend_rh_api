@@ -29,16 +29,26 @@ public final class JobSpecifications {
      * (whose names matched the term).
      */
     public static Specification<Job> titleOrClient(String term, Collection<UUID> matchingClientIds) {
+        return text(term, matchingClientIds, false);
+    }
+
+    /** Same as {@link #titleOrClient} plus the city (global search of the top bar). */
+    public static Specification<Job> titleCityOrClient(String term, Collection<UUID> matchingClientIds) {
+        return text(term, matchingClientIds, true);
+    }
+
+    private static Specification<Job> text(String term, Collection<UUID> matchingClientIds, boolean withCity) {
         return (root, query, cb) -> {
             if (term == null || term.isBlank()) {
                 return null;
             }
-            String pattern = "%" + term.trim().toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-            var title = cb.like(
-                    cb.function("unaccent", String.class, cb.lower(root.get("title"))),
-                    cb.function("unaccent", String.class, cb.literal(pattern)),
-                    '\\');
-            return matchingClientIds.isEmpty() ? title : cb.or(title, root.get("clientId").in(matchingClientIds));
+            var pattern = cb.function("unaccent", String.class, cb.literal(
+                    "%" + term.trim().toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"));
+            var match = cb.like(cb.function("unaccent", String.class, cb.lower(root.get("title"))), pattern, '\\');
+            if (withCity) {
+                match = cb.or(match, cb.like(cb.function("unaccent", String.class, cb.lower(root.get("city"))), pattern, '\\'));
+            }
+            return matchingClientIds.isEmpty() ? match : cb.or(match, root.get("clientId").in(matchingClientIds));
         };
     }
 }

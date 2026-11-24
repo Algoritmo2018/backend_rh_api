@@ -12,6 +12,7 @@ import com.minhaempresa.recrutamentoapi.job.dto.request.SalaryRangeRequest;
 import com.minhaempresa.recrutamentoapi.job.dto.request.ScreeningQuestionRequest;
 import com.minhaempresa.recrutamentoapi.job.dto.response.JobListItemResponse;
 import com.minhaempresa.recrutamentoapi.job.dto.response.JobResponse;
+import com.minhaempresa.recrutamentoapi.job.dto.response.JobSearchHitResponse;
 import com.minhaempresa.recrutamentoapi.job.entity.Job;
 import com.minhaempresa.recrutamentoapi.job.entity.JobRequirement;
 import com.minhaempresa.recrutamentoapi.job.entity.JobStatus;
@@ -59,6 +60,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -113,6 +115,21 @@ public class JobService {
     @Transactional(readOnly = true)
     public JobListItemResponse get(UUID id) {
         return toListItems(List.of(find(id))).getFirst();
+    }
+
+    /** Global search of the top bar: title, city or client name; open jobs first. */
+    @Transactional(readOnly = true)
+    public List<JobSearchHitResponse> quickSearch(String term, int limit) {
+        String search = term.trim();
+        List<Job> jobs = repository.findAll(
+                JobSpecifications.titleCityOrClient(search, clientService.idsWithNameContaining(search)),
+                PageRequest.of(0, 50, RECENTLY_UPDATED)).getContent();
+        Map<UUID, String> clientNames = clientService.namesOf(jobs.stream().map(Job::getClientId).toList());
+        return jobs.stream()
+                .sorted(Comparator.comparing((Job j) -> j.getStatus() != JobStatus.OPEN))
+                .limit(limit)
+                .map(j -> new JobSearchHitResponse(j.getId(), j.getTitle(), clientNames.get(j.getClientId()), j.getStatus()))
+                .toList();
     }
 
     // =====================================================================================

@@ -32,6 +32,10 @@ public interface JobRepository extends JpaRepository<Job, UUID>, JpaSpecificatio
     @Query("SELECT j FROM Job j WHERE j.featured = TRUE AND " + PUBLICLY_VISIBLE + " ORDER BY j.publishedAt DESC, j.id DESC")
     List<Job> findFeatured(@Param("today") LocalDate today, Pageable limit);
 
+    /** Visible jobs, newest publication first (limit through the pageable). */
+    @Query("SELECT j FROM Job j WHERE " + PUBLICLY_VISIBLE + " ORDER BY j.publishedAt DESC, j.id DESC")
+    List<Job> findVisible(@Param("today") LocalDate today, Pageable limit);
+
     @Query("SELECT j.area AS area, COUNT(j) AS total FROM Job j WHERE " + PUBLICLY_VISIBLE + " GROUP BY j.area")
     List<AreaCount> countVisibleByArea(@Param("today") LocalDate today);
 

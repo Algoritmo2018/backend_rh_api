@@ -33,6 +33,7 @@
 		<lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
 		<springdoc.version>3.2.0</springdoc.version>
 		<jsoup.version>1.21.1</jsoup.version>
+		<awssdk.version>2.57.5</awssdk.version>
 	</properties>
 	<dependencies>
 		<!-- Web, validation, monitoring -->
@@ -86,6 +87,19 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-thymeleaf</artifactId>
+		</dependency>
+
+		<!-- File storage: S3 / MinIO (AWS SDK v2, synchronous Apache HTTP client only) -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>${awssdk.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>software.amazon.awssdk</groupId>
+					<artifactId>netty-nio-client</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 
 		<!-- Allow-list HTML sanitizer for rich text (job descriptions) -->
@@ -177,6 +191,11 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-minio</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
