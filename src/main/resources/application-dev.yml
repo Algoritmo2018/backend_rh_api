@@ -35,6 +35,17 @@ app:
     token-pepper: dev-only-token-pepper-change-me-0123456789
   mail:
     from: FEH OIRAM <nao-responder@fehoiram.local>
+    # Mailpit runs on the local machine
+    block-private-hosts: false
+    outbox:
+      poll-interval: 2s
+  storage:
+    s3:
+      # MinIO of docker-compose.yml (credentials from .env, same variables as the container)
+      endpoint: http://localhost:${MINIO_PORT:9000}
+      access-key: ${MINIO_ROOT_USER:recrutamento}
+      secret-key: ${MINIO_ROOT_PASSWORD:recrutamento-dev}
+      create-bucket: true
   notifications:
     allow-simulated-sms: true
     log-message-content: true

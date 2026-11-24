@@ -10,16 +10,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.minhaempresa.recrutamentoapi.IntegrationTest;
-import com.minhaempresa.recrutamentoapi.shared.storage.StorageProperties;
+import com.minhaempresa.recrutamentoapi.shared.storage.StorageService;
 import com.minhaempresa.recrutamentoapi.support.AuthApi;
 import com.minhaempresa.recrutamentoapi.support.TestUsers;
 import com.minhaempresa.recrutamentoapi.support.TestUsers.TestUser;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,7 +49,7 @@ class CompanySettingsIntegrationTest {
     JdbcTemplate jdbc;
 
     @Autowired
-    StorageProperties storageProperties;
+    StorageService storage;
 
     AuthApi api;
     TestUser admin;
@@ -164,12 +163,11 @@ class CompanySettingsIntegrationTest {
         String firstKey = jdbc.queryForObject("SELECT logo_key FROM company_settings", String.class);
         assertThat(firstKey).matches("company-logo/[0-9a-f-]{36}\\.png");
         assertThat(jdbc.queryForObject("SELECT logo_original_name FROM company_settings", String.class)).isEqualTo("../../evil name.png");
-        Path root = Path.of(storageProperties.local().root());
-        assertThat(Files.exists(root.resolve(firstKey))).isTrue();
+        assertThat(storage.load(firstKey).contentLength()).isEqualTo(1_000);
 
         upload("novo.png", "image/png", png(1_500)).andExpect(status().isOk());
 
-        assertThat(Files.exists(root.resolve(firstKey))).as("previous file deleted after commit").isFalse();
+        assertThatThrownBy(() -> storage.load(firstKey)).as("previous file deleted after commit").isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
@@ -187,9 +185,10 @@ class CompanySettingsIntegrationTest {
 
     /** The 1 MB request limit is enforced by Tomcat (not by MockMvc): check the effective configuration. */
     @Test
-    void multipartLimitsAreOneMegabyte(@Autowired org.springframework.boot.servlet.autoconfigure.MultipartProperties multipart) {
-        assertThat(multipart.getMaxFileSize().toMegabytes()).isEqualTo(1);
-        assertThat(multipart.getMaxRequestSize().toMegabytes()).isEqualTo(1);
+    void multipartLimitsFitTheLargestDocument(@Autowired org.springframework.boot.servlet.autoconfigure.MultipartProperties multipart) {
+        // Candidate documents (10 MB); the logo keeps its own 300 KB limit in the service
+        assertThat(multipart.getMaxFileSize().toMegabytes()).isEqualTo(10);
+        assertThat(multipart.getMaxRequestSize().toMegabytes()).isEqualTo(11);
     }
 
     @Test

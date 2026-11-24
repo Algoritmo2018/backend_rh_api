@@ -32,6 +32,11 @@ app:
       per-email: { max: 3, window: 1h }
   mail:
     from: FEH OIRAM <nao-responder@fehoiram.test>
+    # The test SMTP servers (Mailpit, refused ports) are on the local machine
+    block-private-hosts: false
+    outbox:
+      # Emails leave quickly in tests (they are awaited in Mailpit)
+      poll-interval: 200ms
   storage:
     local:
       root: ${java.io.tmpdir}/recrutamento-api-test-uploads

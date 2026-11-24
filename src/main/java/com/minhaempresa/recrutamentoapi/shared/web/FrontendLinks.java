@@ -65,6 +65,20 @@ public class FrontendLinks {
         return builder("/app/entrevistas").toUriString();
     }
 
+    /** Settings of the internal panel (administrators). */
+    public String settings() {
+        return builder("/app/configuracoes").toUriString();
+    }
+
+    /**
+     * The same link as a path inside the frontend app ({@code /app/vagas/…}), for in-app notifications
+     * (the frontend router navigates to it; emails use the full URL).
+     */
+    public String inAppPath(String link) {
+        String base = properties.frontendUrl().replaceAll("/+$", "");
+        return link != null && link.startsWith(base) ? link.substring(base.length()) : link;
+    }
+
     /** The token is a URI variable, so it is strictly encoded (any reserved character is escaped). */
     private String withToken(String path, String token) {
         return builder(path).queryParam("token", "{token}").encode().buildAndExpand(token).toUriString();

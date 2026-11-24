@@ -42,9 +42,10 @@ spring:
     default-encoding: UTF-8
   servlet:
     multipart:
-      # Only the company logo (300 KB) for now; raised in stage 6 (CVs and documents)
-      max-file-size: 1MB
-      max-request-size: 1MB
+      # Largest upload: candidate documents (10 MB). Each endpoint checks its own, lower limit
+      # (logo 300 KB, photo 2 MB, CV 5 MB). The request also carries the form fields.
+      max-file-size: 10MB
+      max-request-size: 11MB
   cache:
     type: caffeine
     # Catalogs change rarely; writes evict them. The expiry bounds staleness with several instances.
@@ -130,11 +131,44 @@ app:
       per-ip: { max: 20, window: 1h }
       per-email: { max: 3, window: 1h }
   storage:
+    # s3 = S3 or MinIO (private bucket, encrypted at rest); local = local disk (only for experiments)
+    type: s3
     local:
-      # Uploaded files (local disk until the S3 implementation in stage 6)
       root: ./data/uploads
+    s3:
+      # Empty for AWS S3; MinIO: http://host:9000
+      endpoint: ${APP_STORAGE_S3_ENDPOINT:}
+      region: ${APP_STORAGE_S3_REGION:us-east-1}
+      bucket: ${APP_STORAGE_S3_BUCKET:recrutamento-files}
+      # Empty → AWS default credentials chain. Secrets only from the environment (.env), never in git
+      access-key: ${APP_STORAGE_S3_ACCESS_KEY:}
+      secret-key: ${APP_STORAGE_S3_SECRET_KEY:}
+      path-style: ${APP_STORAGE_S3_PATH_STYLE:true}
+      # SSE-S3 (AES256) on every object; MinIO needs MINIO_KMS_SECRET_KEY (see .env.example)
+      server-side-encryption: true
+      # Production: the bucket is created (private) by the operators
+      create-bucket: false
   notifications:
     # Allow features that need SMS (2FA, OTP login) with the log-only SMS sender (dev/test only)
     allow-simulated-sms: false
     # Log the full content of simulated SMS/WhatsApp messages (dev only: they contain codes)
     log-message-content: false
+    # Bell: read notifications and every notification are deleted after these periods (daily job)
+    read-retention: 90d
+    retention: 180d
+  mail:
+    # SMTP accounts of the settings must be public servers (no loopback / link-local / private networks)
+    block-private-hosts: true
+    outbox:
+      poll-interval: 10s
+      batch-size: 20
+      # Wait before each new attempt; after the last one the email is "failed" and the admins are told
+      retry-delays: [1m, 5m, 30m, 2h, 6h]
+      sent-retention: 30d
+      failed-retention: 90d
+  secrets:
+    # AES-256-GCM key of the secrets stored in the database (SMTP passwords): 32 random bytes in base64
+    # (openssl rand -base64 32). Only from the environment (.env), never in git.
+    key: ${APP_SECRETS_KEY:}
+    # Previous key while rotating (values encrypted with it are still read)
+    previous-key: ${APP_SECRETS_KEY_PREVIOUS:}

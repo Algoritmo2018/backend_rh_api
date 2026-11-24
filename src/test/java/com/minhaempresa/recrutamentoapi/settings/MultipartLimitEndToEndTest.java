@@ -23,10 +23,14 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The multipart limit (1 MB) is enforced by the servlet container, so it is checked against a real
- * server: a 2 MB upload gets the standard 413 error body.
+ * The multipart limit is enforced by the servlet container, so the 413 error body is checked against a
+ * real server. The limits are lowered to 1 MB here: with the real 10 MB limit the server answers while
+ * the client is still sending, and the connection is reset before the answer can be read. The real
+ * values (10 MB / 11 MB) are checked in {@code CompanySettingsIntegrationTest}.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {"spring.servlet.multipart.max-file-size=1MB", "spring.servlet.multipart.max-request-size=1MB"})
 @ActiveProfiles("test")
 @Import({TestcontainersConfiguration.class, TestSupportConfiguration.class, TestUsers.class})
 class MultipartLimitEndToEndTest {
@@ -38,7 +42,7 @@ class MultipartLimitEndToEndTest {
     TestUsers users;
 
     @Test
-    void twoMegabyteUploadIs413WithTheStandardBody() {
+    void uploadAboveTheLimitIs413WithTheStandardBody() {
         String token = users.accessToken(users.create(UserRole.ADMIN));
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add("file", new ByteArrayResource(new byte[2 * 1024 * 1024]) {

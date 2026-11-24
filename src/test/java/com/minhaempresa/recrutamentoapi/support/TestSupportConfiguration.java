@@ -26,6 +26,12 @@ public class TestSupportConfiguration {
         return new RecordingSmsSender();
     }
 
+    /** Interviewer assignments and erasure contributions of the modules that do not exist yet. */
+    @Bean
+    TestCandidateAccess testCandidateAccess() {
+        return new TestCandidateAccess();
+    }
+
     @Bean
     MailpitClient mailpitClient(GenericContainer<?> mailpitContainer) {
         return new MailpitClient("http://" + mailpitContainer.getHost() + ":" + mailpitContainer.getMappedPort(TestcontainersConfiguration.MAILPIT_HTTP_PORT));

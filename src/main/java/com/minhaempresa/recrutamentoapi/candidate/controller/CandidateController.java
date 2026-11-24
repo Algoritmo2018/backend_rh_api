@@ -3,7 +3,11 @@ package com.minhaempresa.recrutamentoapi.candidate.controller;
 import com.minhaempresa.recrutamentoapi.candidate.dto.request.TalentSearchQuery;
 import com.minhaempresa.recrutamentoapi.candidate.dto.response.CandidateProfileResponse;
 import com.minhaempresa.recrutamentoapi.candidate.dto.response.CandidateSummaryResponse;
+import com.minhaempresa.recrutamentoapi.candidate.dto.response.DocumentResponse;
+import com.minhaempresa.recrutamentoapi.candidate.dto.response.ReferenceResponse;
 import com.minhaempresa.recrutamentoapi.candidate.service.CandidateService;
+import com.minhaempresa.recrutamentoapi.candidate.service.DocumentService;
+import com.minhaempresa.recrutamentoapi.candidate.service.ReferenceService;
 import com.minhaempresa.recrutamentoapi.candidate.service.TalentSearchService;
 import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import com.minhaempresa.recrutamentoapi.shared.web.PageResponse;
@@ -25,6 +29,8 @@ public class CandidateController {
 
     private final CandidateService candidateService;
     private final TalentSearchService talentSearchService;
+    private final DocumentService documentService;
+    private final ReferenceService referenceService;
 
     /** Talent pool (only candidates who consented), 12 per page by default. */
     @GetMapping("/search")
@@ -38,6 +44,19 @@ public class CandidateController {
     @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER', 'CANDIDATE')")
     public List<String> skills() {
         return candidateService.skillSuggestions();
+    }
+
+    /** Every document of the candidate, sensitive ones included (never interviewers). */
+    @GetMapping("/{id}/documents")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER')")
+    public List<DocumentResponse> documents(@PathVariable UUID id) {
+        return documentService.listForCandidate(id);
+    }
+
+    @GetMapping("/{id}/references")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER')")
+    public List<ReferenceResponse> references(@PathVariable UUID id) {
+        return referenceService.listForCandidate(id);
     }
 
     /** Interviewers: only candidates assigned to them, without private data. */

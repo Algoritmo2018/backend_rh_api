@@ -26,5 +26,24 @@ services:
       # Not a service Spring Boot can connect to automatically
       org.springframework.boot.ignore: "true"
 
+  # S3-compatible storage (CVs, documents, logo). The official MinIO images are no longer published;
+  # this is the MinIO build maintained by Chainguard, pinned by digest (update the digest on purpose).
+  # Spring Boot waits for its port before starting (no "ignore" label); the bucket is created private
+  # by the application in the dev profile.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:f2e56aceb4d38ad9b05c901270946e2353b19f86ba4396f25cf75b15b455b38c
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-recrutamento}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-recrutamento-dev}
+      # Key of the server-side encryption (SSE-S3). Only in .env, never in git: compose refuses to start without it
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?Set MINIO_KMS_SECRET_KEY in .env (see .env.example)}
+    ports:
+      - "${MINIO_PORT:-9000}:9000" # S3 API
+      - "9001:9001" # Web console
+    volumes:
+      - minio-data:/data
+
 volumes:
   postgres-data:
+  minio-data:

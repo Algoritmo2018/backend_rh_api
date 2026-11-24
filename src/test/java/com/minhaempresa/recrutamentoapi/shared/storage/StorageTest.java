@@ -3,6 +3,7 @@ package com.minhaempresa.recrutamentoapi.shared.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.minhaempresa.recrutamentoapi.support.SampleFiles;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +17,7 @@ class StorageTest {
     Path root;
 
     private LocalStorageService storage() {
-        return new LocalStorageService(new StorageProperties(new StorageProperties.Local(root.toString())));
+        return new LocalStorageService(new StorageProperties(StorageProperties.Type.LOCAL, new StorageProperties.Local(root.toString()), null));
     }
 
     @Test
@@ -57,7 +58,17 @@ class StorageTest {
         assertThat(FileType.detect(new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0})).contains(FileType.JPEG);
         assertThat(FileType.detect("RIFF0000WEBPVP8 ".getBytes(StandardCharsets.US_ASCII))).contains(FileType.WEBP);
         assertThat(FileType.detect("<svg></svg>".getBytes(StandardCharsets.US_ASCII))).isEmpty();
-        assertThat(FileType.detect("%PDF-1.7".getBytes(StandardCharsets.US_ASCII))).isEmpty();
+        assertThat(FileType.detect(SampleFiles.pdf())).contains(FileType.PDF);
         assertThat(FileType.detect(new byte[0])).isEmpty();
+    }
+
+    @Test
+    void wordDocumentsOnlyWithoutMacrosAndNeverTheLegacyFormat() {
+        assertThat(FileType.detect(SampleFiles.docx())).contains(FileType.DOCX);
+        assertThat(FileType.detect(SampleFiles.docxWithMacros())).isEmpty();
+        assertThat(FileType.detect(SampleFiles.plainZip())).isEmpty();
+        assertThat(FileType.detect(SampleFiles.legacyDoc())).isEmpty();
+        // A ZIP signature followed by garbage is not an archive
+        assertThat(FileType.detect(new byte[] {'P', 'K', 3, 4, 1, 2, 3})).isEmpty();
     }
 }

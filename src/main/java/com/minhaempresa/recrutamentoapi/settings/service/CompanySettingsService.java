@@ -104,7 +104,8 @@ public class CompanySettingsService {
         if (content.length == 0 || content.length > MAX_LOGO_BYTES) {
             throw invalidLogo("settings.logo.too-large");
         }
-        FileType type = FileType.detect(content).orElseThrow(() -> invalidLogo("settings.logo.invalid-type"));
+        // Images only: PDF and DOCX are also detected (documents) but never accepted as a logo
+        FileType type = FileType.detect(content).filter(FileType::isImage).orElseThrow(() -> invalidLogo("settings.logo.invalid-type"));
         CompanySettings s = load();
         StoredFile stored = storage.store(LOGO_CATEGORY, type, content);
         String previousKey = s.getLogoKey();

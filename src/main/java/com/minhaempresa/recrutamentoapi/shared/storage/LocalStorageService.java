@@ -12,13 +12,13 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
+
 
 /**
  * Files on the local disk under {@code app.storage.local.root}. Every key is resolved and checked to
  * stay inside the root, so a crafted key ({@code ../../etc/passwd}) can never escape it.
  */
-@Service
+
 public class LocalStorageService implements StorageService {
 
     private static final Pattern CATEGORY = Pattern.compile("[a-z0-9-]+");

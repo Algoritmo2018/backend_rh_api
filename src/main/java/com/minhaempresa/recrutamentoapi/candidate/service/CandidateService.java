@@ -15,7 +15,9 @@ import com.minhaempresa.recrutamentoapi.candidate.entity.Education;
 import com.minhaempresa.recrutamentoapi.candidate.entity.LanguageLevel;
 import com.minhaempresa.recrutamentoapi.candidate.entity.WorkExperience;
 import com.minhaempresa.recrutamentoapi.candidate.mapper.CandidateMapper;
+import com.minhaempresa.recrutamentoapi.candidate.dto.response.DocumentResponse;
 import com.minhaempresa.recrutamentoapi.candidate.repository.CandidateRepository;
+import com.minhaempresa.recrutamentoapi.candidate.repository.DocumentRepository;
 import com.minhaempresa.recrutamentoapi.job.dto.response.JobRequirementResponse;
 import com.minhaempresa.recrutamentoapi.shared.config.AppProperties;
 import com.minhaempresa.recrutamentoapi.shared.domain.CandidateSource;
@@ -68,6 +70,7 @@ public class CandidateService {
     private static final double DAYS_PER_MONTH = 30.44;
 
     private final CandidateRepository repository;
+    private final DocumentRepository documentRepository;
     private final CandidateMapper mapper;
     private final UserService userService;
     private final CandidateAccessPolicy accessPolicy;
@@ -187,8 +190,12 @@ public class CandidateService {
         if (!restricted && !viewer.hasRole(UserRole.ADMIN.name()) && !viewer.hasRole(UserRole.RECRUITER.name())) {
             throw new ForbiddenException();
         }
-        CandidateResponse candidate = mapper.toResponse(find(id));
-        return new CandidateProfileResponse(restricted ? candidate.withoutPrivateData() : candidate, null, List.of(), restricted);
+        Candidate entity = find(id);
+        CandidateResponse candidate = mapper.toResponse(entity);
+        DocumentResponse cv = entity.getCvDocumentId() == null
+                ? null
+                : documentRepository.findById(entity.getCvDocumentId()).map(mapper::toDocumentResponse).orElse(null);
+        return new CandidateProfileResponse(restricted ? candidate.withoutPrivateData() : candidate, cv, List.of(), restricted);
     }
 
     /** Top-bar search: name, headline, email or phone. Interviewers only find their candidates. */
@@ -196,7 +203,7 @@ public class CandidateService {
     public List<CandidateSearchHitResponse> quickSearch(String term, AuthenticatedUser viewer) {
         String pattern = "%" + Texts.escapeLike(term.trim()) + "%";
         if (!viewer.hasRole(UserRole.INTERVIEWER.name())) {
-            return load(repository.quickSearch(pattern, QUICK_SEARCH_LIMIT)).stream().map(mapper::toSearchHit).toList();
+            return load(repository.quickSearch(pattern, QUICK_SEARCH_LIMIT)).stream().map(c -> mapper.toSearchHit(c, true)).toList();
         }
         Set<UUID> visible = accessPolicy.visibleToInterviewer(viewer.id());
         if (visible.isEmpty()) {
@@ -205,7 +212,7 @@ public class CandidateService {
         return load(repository.quickSearch(pattern, 200)).stream()
                 .filter(c -> visible.contains(c.getId()))
                 .limit(QUICK_SEARCH_LIMIT)
-                .map(mapper::toSearchHit)
+                .map(c -> mapper.toSearchHit(c, false))
                 .toList();
     }
 

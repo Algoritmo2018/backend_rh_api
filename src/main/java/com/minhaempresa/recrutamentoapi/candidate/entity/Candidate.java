@@ -111,9 +111,13 @@ public class Candidate extends UserAuditableEntity {
     })
     private Money salaryExpectation;
 
-    /** Current CV (documents, stage 6b). */
+    /** Current CV document. */
     @Column(name = "cv_document_id")
     private UUID cvDocumentId;
+
+    /** Current profile photo (document {@code photo}); never used in the score nor in the search. */
+    @Column(name = "photo_document_id")
+    private UUID photoDocumentId;
 
     @Column(name = "total_experience_years", nullable = false)
     private int totalExperienceYears;
@@ -172,6 +176,36 @@ public class Candidate extends UserAuditableEntity {
         Education item = new Education(this);
         education.add(item);
         return item;
+    }
+
+    /**
+     * Removes every personal data of the profile (Lei n.º 22/11 erasure). The row stays, so applications
+     * and reports keep their numbers ("Candidato removido"); the email becomes a unique placeholder.
+     */
+    public void anonymize(String placeholderName, String placeholderEmail) {
+        fullName = placeholderName;
+        email = placeholderEmail;
+        phone = "";
+        whatsapp = null;
+        gender = null;
+        birthDate = null;
+        nationality = "";
+        province = null;
+        city = "";
+        headline = "";
+        summary = null;
+        skills = new ArrayList<>();
+        driverLicenses = new ArrayList<>();
+        salaryExpectation = null;
+        cvDocumentId = null;
+        photoDocumentId = null;
+        totalExperienceYears = 0;
+        inTalentPool = false;
+        searchText = "";
+        tagIds.clear();
+        experience.clear();
+        education.clear();
+        languages.clear();
     }
 
     public CandidateLanguage addLanguage(String language, String key, LanguageLevel level) {

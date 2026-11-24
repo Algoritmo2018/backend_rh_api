@@ -36,9 +36,13 @@ app:
   mail:
     from: ${APP_MAIL_FROM}
   storage:
-    local:
-      # Until stage 6 (S3/MinIO): a persistent volume
-      root: ${APP_STORAGE_LOCAL_ROOT:/var/lib/recrutamento-api/uploads}
+    type: s3
+    s3:
+      # Required in production: where the private, encrypted bucket lives
+      endpoint: ${APP_STORAGE_S3_ENDPOINT:}
+      region: ${APP_STORAGE_S3_REGION}
+      bucket: ${APP_STORAGE_S3_BUCKET}
+      create-bucket: false
   bootstrap:
     admin:
       email: ${APP_BOOTSTRAP_ADMIN_EMAIL:}

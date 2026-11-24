@@ -51,12 +51,13 @@ public record CandidateResponse(
         Instant updatedAt) {
 
     /**
-     * Interviewer view (decision D6-1): no contacts, birth date nor salary expectation. The CV stays
-     * available to interviewers on purpose, although it may contain contacts.
+     * Interviewer view (decision D6-1): no contacts, birth date, salary expectation nor photo (a
+     * document they cannot open). The CV stays available to interviewers on purpose, although it may
+     * contain contacts.
      */
     public CandidateResponse withoutPrivateData() {
         return new CandidateResponse(id, null, fullName, null, null, null, gender, null, nationality, isAngolan, province, city,
-                headline, summary, avatarUrl, experience, education, skills, languages, driverLicenses, availability, null,
+                headline, summary, null, experience, education, skills, languages, driverLicenses, availability, null,
                 cvDocumentId, totalExperienceYears, sourceId, tagIds, inTalentPool, createdAt, updatedAt);
     }
 }

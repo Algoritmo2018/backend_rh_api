@@ -3,11 +3,15 @@ package com.minhaempresa.recrutamentoapi.candidate;
 import static com.minhaempresa.recrutamentoapi.support.CandidateApi.json;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.minhaempresa.recrutamentoapi.IntegrationTest;
 import com.minhaempresa.recrutamentoapi.support.CandidateApi;
+import com.minhaempresa.recrutamentoapi.support.SampleFiles;
+import org.springframework.mock.web.MockMultipartFile;
 import com.minhaempresa.recrutamentoapi.support.TestUsers;
 import com.minhaempresa.recrutamentoapi.support.TestUsers.TestUser;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
@@ -35,16 +39,38 @@ import tools.jackson.databind.JsonNode;
 class CandidateIsolationTest {
 
     /** Every endpoint of the candidates module and of the global search, with who may call it. */
-    static final Map<String, Set<UserRole>> ENDPOINTS = Map.of(
-            "GET /api/v1/me/candidate", Set.of(UserRole.CANDIDATE),
-            "PATCH /api/v1/me/candidate", Set.of(UserRole.CANDIDATE),
-            "GET /api/v1/me/consents", Set.of(UserRole.CANDIDATE),
-            "PUT /api/v1/me/consents/{type}", Set.of(UserRole.CANDIDATE),
-            "GET /api/v1/me/recommended-jobs", Set.of(UserRole.CANDIDATE),
-            "GET /api/v1/candidates/search", Set.of(UserRole.ADMIN, UserRole.RECRUITER),
-            "GET /api/v1/candidates/skills", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.CANDIDATE),
-            "GET /api/v1/candidates/{id}/profile", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER),
-            "GET /api/v1/search", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER));
+    static final Map<String, Set<UserRole>> ENDPOINTS = Map.ofEntries(
+            Map.entry("GET /api/v1/me/candidate", Set.of(UserRole.CANDIDATE)),
+            Map.entry("PATCH /api/v1/me/candidate", Set.of(UserRole.CANDIDATE)),
+            Map.entry("GET /api/v1/me/consents", Set.of(UserRole.CANDIDATE)),
+            Map.entry("PUT /api/v1/me/consents/{type}", Set.of(UserRole.CANDIDATE)),
+            Map.entry("GET /api/v1/me/recommended-jobs", Set.of(UserRole.CANDIDATE)),
+            Map.entry("GET /api/v1/me/documents", Set.of(UserRole.CANDIDATE)),
+            Map.entry("POST /api/v1/me/documents", Set.of(UserRole.CANDIDATE)),
+            Map.entry("DELETE /api/v1/me/documents/{id}", Set.of(UserRole.CANDIDATE)),
+            Map.entry("GET /api/v1/candidates/search", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("GET /api/v1/candidates/skills", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.CANDIDATE)),
+            Map.entry("GET /api/v1/candidates/{id}/profile", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER)),
+            Map.entry("GET /api/v1/candidates/{id}/documents", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("GET /api/v1/candidates/{id}/references", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("PATCH /api/v1/documents/{id}/review", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("GET /api/v1/documents/{id}/file", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER, UserRole.CANDIDATE)),
+            Map.entry("POST /api/v1/references", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("PATCH /api/v1/references/{id}/status", Set.of(UserRole.ADMIN, UserRole.RECRUITER)),
+            Map.entry("GET /api/v1/search", Set.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER)));
+
+    /** Valid bodies, so the role check (not the validation) decides the answer. */
+    static Object body(String endpoint, String candidateId) {
+        return switch (endpoint) {
+            case "PATCH /api/v1/me/candidate" -> Map.of();
+            case "PUT /api/v1/me/consents/{type}" -> Map.of("granted", true);
+            case "PATCH /api/v1/documents/{id}/review" -> Map.of("status", "approved");
+            case "PATCH /api/v1/references/{id}/status" -> Map.of("status", "verified");
+            case "POST /api/v1/references" -> Map.of("candidateId", candidateId, "name", "Maria Teste Silva", "company", "ACME",
+                    "role", "Gestora", "relationship", "Chefia", "phone", "923000999");
+            default -> null;
+        };
+    }
 
     @Autowired
     MockMvc mvc;
@@ -87,21 +113,29 @@ class CandidateIsolationTest {
             String path = parts[1].replace("{type}", "marketing").replace("{id}", candidateId);
             for (UserRole role : List.of(UserRole.ADMIN, UserRole.RECRUITER, UserRole.INTERVIEWER, UserRole.CLIENT, UserRole.CANDIDATE)) {
                 TestUser user = role == UserRole.CANDIDATE ? candidates.verifiedCandidate() : users.create(role);
-                Object body = parts[0].equals("PUT") ? Map.of("granted", true) : parts[0].equals("PATCH") ? Map.of() : null;
-                int status = body == null
-                        ? mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(HttpMethod.valueOf(parts[0]), path)
-                                .with(users.bearer(user))).andReturn().getResponse().getStatus()
-                        : candidates.api().sendJson(parts[0], path, users.accessToken(user), body).andReturn().getResponse().getStatus();
+                Object body = body(endpoint.getKey(), candidateId);
+                int status;
+                if (endpoint.getKey().equals("POST /api/v1/me/documents")) {
+                    status = mvc.perform(multipart("/api/v1/me/documents")
+                                    .file(new MockMultipartFile("file", "cv.pdf", "application/pdf", SampleFiles.pdf()))
+                                    .param("type", "cv")
+                                    .with(users.bearer(user)))
+                            .andReturn().getResponse().getStatus();
+                } else if (body == null) {
+                    status = mvc.perform(request(HttpMethod.valueOf(parts[0]), path).with(users.bearer(user))).andReturn().getResponse().getStatus();
+                } else {
+                    status = candidates.api().sendJson(parts[0], path, users.accessToken(user), body).andReturn().getResponse().getStatus();
+                }
                 boolean allowedRole = endpoint.getValue().contains(role);
                 boolean interviewerOnProfile = role == UserRole.INTERVIEWER && path.endsWith("/profile");
                 if (allowedRole && !interviewerOnProfile) {
-                    assertThat(status).as(role + " " + endpoint.getKey()).isBetween(200, 299);
+                    // Allowed: never refused for the role (ids of other records may still be 404)
+                    assertThat(status).as(role + " " + endpoint.getKey()).isNotIn(401, 403).isLessThan(500);
                 } else {
                     assertThat(status).as(role + " " + endpoint.getKey()).isEqualTo(403);
                 }
             }
-            int anonymous = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(HttpMethod.valueOf(parts[0]), path))
-                    .andReturn().getResponse().getStatus();
+            int anonymous = mvc.perform(request(HttpMethod.valueOf(parts[0]), path)).andReturn().getResponse().getStatus();
             assertThat(anonymous).as("anonymous " + endpoint.getKey()).isEqualTo(401);
         }
     }
