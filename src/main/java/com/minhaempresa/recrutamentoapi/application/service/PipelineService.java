@@ -75,6 +75,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -576,6 +577,40 @@ public class PipelineService {
     public InterviewTarget interviewTarget(UUID applicationId) {
         Application a = find(applicationId);
         return new InterviewTarget(a.getId(), a.getJobId(), a.getCandidateId(), a.getStatus(), a.visibleToClient());
+    }
+
+    /**
+     * An application whose evaluations the viewer may read (stage 9b): 404 when missing, 403 for an interviewer neither
+     * assigned to the job nor interviewer of one of its interviews.
+     */
+    @Transactional(readOnly = true)
+    public EvaluationTarget evaluationTarget(UUID applicationId, AuthenticatedUser viewer) {
+        Application a = find(applicationId);
+        checkApplicationViewer(viewer, a);
+        return new EvaluationTarget(a.getId(), a.getJobId(), a.getCandidateId());
+    }
+
+    /** Of these applications, the ones the viewer may read (all of them for administrators and recruiters). */
+    @Transactional(readOnly = true)
+    public Set<UUID> viewableApplicationIds(AuthenticatedUser viewer, Collection<UUID> applicationIds) {
+        if (viewer.hasRole(UserRole.ADMIN.name()) || viewer.hasRole(UserRole.RECRUITER.name())) {
+            return Set.copyOf(applicationIds);
+        }
+        if (!viewer.hasRole(UserRole.INTERVIEWER.name()) || applicationIds.isEmpty()) {
+            return Set.of();
+        }
+        InterviewerApplicationAccess access = interviewAccess.getIfAvailable();
+        Set<UUID> byInterview = access == null ? Set.of() : access.applicationIdsOf(viewer.id());
+        Map<UUID, Boolean> assignedJobs = new HashMap<>();
+        Set<UUID> result = new HashSet<>();
+        for (Application application : repository.findAllById(applicationIds)) {
+            boolean assigned = assignedJobs.computeIfAbsent(application.getJobId(),
+                    jobId -> jobService.findApplicable(jobId).map(job -> job.interviewerIds().contains(viewer.id())).orElse(false));
+            if (assigned || byInterview.contains(application.getId())) {
+                result.add(application.getId());
+            }
+        }
+        return result;
     }
 
     private Application find(UUID id) {

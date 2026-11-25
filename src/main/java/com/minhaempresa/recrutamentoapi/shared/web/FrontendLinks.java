@@ -85,6 +85,16 @@ public class FrontendLinks {
         return builder("/app/entrevistas").toUriString();
     }
 
+    /** Candidate page of the internal panel, opened on one application (every staff role). */
+    public String candidateApplication(UUID candidateId, UUID applicationId) {
+        return builder("/app/candidatos/{id}").queryParam("candidatura", "{applicationId}").buildAndExpand(candidateId, applicationId).toUriString();
+    }
+
+    /** "Minhas avaliações" of the internal panel (interviewers, stage 9b). */
+    public String myEvaluations() {
+        return builder("/app/minhas-avaliacoes").toUriString();
+    }
+
     /** Client portal agenda of client interviews (stage 9). */
     public String clientPortalInterviews() {
         return builder("/cliente/entrevistas").toUriString();

@@ -20,7 +20,13 @@ public enum NotificationType implements WireEnum {
     INTERVIEW_ASSIGNED("interview_assigned"),
     /** Interviews: time, place or link changed, or a slot was chosen. */
     INTERVIEW_UPDATED("interview_updated"),
-    INTERVIEW_CANCELLED("interview_cancelled");
+    INTERVIEW_CANCELLED("interview_cancelled"),
+    /** Evaluations (stage 9b): an interview was done, the interviewer has a scorecard to fill. */
+    EVALUATION_REQUESTED("evaluation_requested"),
+    /** The job's recruiter: an evaluation of one of their applications was submitted. */
+    EVALUATION_SUBMITTED("evaluation_submitted"),
+    /** The evaluator: an administrator reopened their evaluation (A4). */
+    EVALUATION_REOPENED("evaluation_reopened");
 
     private final String value;
 

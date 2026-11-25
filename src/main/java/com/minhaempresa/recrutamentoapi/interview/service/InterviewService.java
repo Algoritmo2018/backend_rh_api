@@ -18,6 +18,7 @@ import com.minhaempresa.recrutamentoapi.interview.entity.InterviewType;
 import com.minhaempresa.recrutamentoapi.interview.entity.MeetingProvider;
 import com.minhaempresa.recrutamentoapi.interview.event.InterviewChangedEvent;
 import com.minhaempresa.recrutamentoapi.interview.event.InterviewChangedEvent.Change;
+import com.minhaempresa.recrutamentoapi.interview.event.InterviewCompletedEvent;
 import com.minhaempresa.recrutamentoapi.interview.mapper.InterviewMapper;
 import com.minhaempresa.recrutamentoapi.interview.repository.InterviewRepository;
 import com.minhaempresa.recrutamentoapi.interview.repository.InterviewRepository.ConflictRow;
@@ -244,6 +245,10 @@ public class InterviewService {
         if (target == InterviewStatus.CANCELLED) {
             publish(interview, job(interview.getJobId()), Change.CANCELLED, actor.id(), Boolean.TRUE.equals(request.notifyCandidate()), true, Set.of(), Set.of(),
                     false);
+        } else if (target == InterviewStatus.DONE) {
+            // Stage 9b: one pending evaluation per interviewer, in this transaction
+            events.publishEvent(new InterviewCompletedEvent(interview.getId(), interview.getApplicationId(), interview.getCandidateId(), interview.getJobId(),
+                    Set.copyOf(interview.getInterviewerIds()), actor.id()));
         }
         return responses(List.of(interview)).getFirst();
     }
@@ -345,6 +350,16 @@ public class InterviewService {
     @Transactional(readOnly = true)
     public Set<UUID> applicationIdsOfInterviewer(UUID interviewerId) {
         return Set.copyOf(repository.findApplicationIdsByInterviewer(interviewerId));
+    }
+
+    /** Type, time and mode of these interviews (evaluations, stage 9b); unknown ids are left out. */
+    @Transactional(readOnly = true)
+    public Map<UUID, InterviewSummary> summariesOf(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Interview::getId, i -> new InterviewSummary(i.getId(), i.getType(), i.getStartsAt(), i.getMode())));
     }
 
     // =====================================================================================
