@@ -39,6 +39,10 @@ public interface JobRepository extends JpaRepository<Job, UUID>, JpaSpecificatio
     @Query("SELECT j.area AS area, COUNT(j) AS total FROM Job j WHERE " + PUBLICLY_VISIBLE + " GROUP BY j.area")
     List<AreaCount> countVisibleByArea(@Param("today") LocalDate today);
 
+    /** Ids of the jobs where the user is one of the interviewers. */
+    @Query("SELECT j.id FROM Job j JOIN j.interviewerIds i WHERE i = :userId")
+    List<UUID> findIdsByInterviewer(@Param("userId") UUID userId);
+
     @Query("""
             SELECT j.clientId AS clientId,
                    COUNT(j) AS total,

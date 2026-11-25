@@ -51,6 +51,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -117,6 +118,37 @@ public class JobService {
         return toListItems(List.of(find(id))).getFirst();
     }
 
+    // =====================================================================================
+    // Support for the applications module (never exposed by a controller)
+    // =====================================================================================
+
+    /** A job with its requirements and questions, for applying and for the application views. */
+    @Transactional(readOnly = true)
+    public Optional<ApplicableJob> findApplicable(UUID id) {
+        return repository.findById(id).map(job -> {
+            LocalDate today = today();
+            boolean visible = job.getStatus() == JobStatus.OPEN && (job.getDeadline() == null || !job.getDeadline().isBefore(today));
+            return new ApplicableJob(
+                    job.getId(),
+                    job.getTitle(),
+                    job.getStatus(),
+                    visible,
+                    job.isConfidential(),
+                    job.getClientId(),
+                    clientService.namesOf(List.of(job.getClientId())).get(job.getClientId()),
+                    job.getRecruiterId(),
+                    Set.copyOf(job.getInterviewerIds()),
+                    job.getRequirements().stream().map(mapper::toRequirementResponse).toList(),
+                    job.getScreeningQuestions().stream().map(mapper::toQuestionResponse).toList());
+        });
+    }
+
+    /** Ids of the jobs where the user is an interviewer (their candidates are visible to them, D6-1). */
+    @Transactional(readOnly = true)
+    public List<UUID> jobIdsWithInterviewer(UUID userId) {
+        return repository.findIdsByInterviewer(userId);
+    }
+
     /** Global search of the top bar: title, city or client name; open jobs first. */
     @Transactional(readOnly = true)
     public List<JobSearchHitResponse> quickSearch(String term, int limit) {
@@ -160,8 +192,8 @@ public class JobService {
         List<Assignee> assigned = applyStaff(job, request, actor);
         applyFields(job, request);
         job.setSlug(uniqueSlug(job.getTitle(), job.getCity(), null));
-        replaceRequirements(job, request.requirements());
-        replaceQuestions(job, request.screeningQuestions());
+        replaceRequirements(job, request.requirements(), false);
+        replaceQuestions(job, request.screeningQuestions(), false);
         if (request.status() == JobStatus.OPEN) {
             job.changeStatus(JobStatus.OPEN, clock.instant());
         }
@@ -210,8 +242,9 @@ public class JobService {
         if (!job.wasPublished() && !(job.getTitle().equals(previousTitle) && job.getCity().equals(previousCity))) {
             job.setSlug(uniqueSlug(job.getTitle(), job.getCity(), job.getId()));
         }
-        replaceRequirements(job, request.requirements());
-        replaceQuestions(job, request.screeningQuestions());
+        boolean locked = hasApplications(job.getId());
+        replaceRequirements(job, request.requirements(), locked);
+        replaceQuestions(job, request.screeningQuestions(), locked);
         moveTo(job, request.status(), today);
         repository.flush();
 
@@ -352,16 +385,29 @@ public class JobService {
     /**
      * Child-collection rule: a UUID of a requirement of this job updates it, anything else creates one,
      * and requirements missing from the list are deleted. The position is the order in the list.
+     *
+     * <p>Stage 8 rule: once the job has applications ({@code locked}), an existing requirement cannot change
+     * its {@code weight} or {@code minValue} (the stored scores were computed with them) → 422.
      */
-    private static void replaceRequirements(Job job, List<JobRequirementRequest> items) {
+    private static void replaceRequirements(Job job, List<JobRequirementRequest> items, boolean locked) {
         Map<UUID, JobRequirement> existing = new HashMap<>();
         job.getRequirements().forEach(r -> existing.put(r.getId(), r));
         int position = 0;
         for (JobRequirementRequest item : items == null ? List.<JobRequirementRequest>of() : items) {
             UUID id = parseUuid(item.id());
             JobRequirement requirement = id == null ? null : existing.remove(id);
+            boolean hasMinimum = item.category() == RequirementCategory.EXPERIENCE || item.category() == RequirementCategory.LANGUAGE;
+            Integer minValue = hasMinimum ? item.minValue() : null;
             if (requirement == null) {
                 requirement = job.addRequirement();
+            } else if (locked) {
+                String path = "requirements[" + position + "]";
+                if (requirement.getWeight() != item.weight()) {
+                    throw fieldError(path + ".weight", "job.requirement.locked");
+                }
+                if (!Objects.equals(requirement.getMinValue(), minValue)) {
+                    throw fieldError(path + ".minValue", "job.requirement.locked");
+                }
             }
             requirement.setPosition(position++);
             requirement.setDescription(item.description().trim());
@@ -369,32 +415,56 @@ public class JobService {
             requirement.setWeight(item.weight());
             requirement.setCategory(item.category());
             requirement.setValue(blankToNull(item.value()));
-            boolean hasMinimum = item.category() == RequirementCategory.EXPERIENCE || item.category() == RequirementCategory.LANGUAGE;
-            requirement.setMinValue(hasMinimum ? item.minValue() : null);
+            requirement.setMinValue(minValue);
         }
         job.getRequirements().removeAll(existing.values());
         job.getRequirements().sort(Comparator.comparingInt(JobRequirement::getPosition));
     }
 
-    /** Same rule as {@link #replaceRequirements}; options only for choice questions. */
-    private static void replaceQuestions(Job job, List<ScreeningQuestionRequest> items) {
+    /**
+     * Same rule as {@link #replaceRequirements}; options only for choice questions.
+     *
+     * <p>Stage 8 rule: once the job has applications ({@code locked}), a question cannot be deleted nor change
+     * {@code type}, {@code options}, {@code eliminatory} or {@code expectedAnswer} (the answers and the
+     * eliminations were recorded with them); the text and {@code required} may still be corrected → 422.
+     */
+    private static void replaceQuestions(Job job, List<ScreeningQuestionRequest> items, boolean locked) {
         Map<UUID, ScreeningQuestion> existing = new HashMap<>();
         job.getScreeningQuestions().forEach(q -> existing.put(q.getId(), q));
         int position = 0;
         for (ScreeningQuestionRequest item : items == null ? List.<ScreeningQuestionRequest>of() : items) {
             UUID id = parseUuid(item.id());
             ScreeningQuestion question = id == null ? null : existing.remove(id);
+            boolean choice = item.type() == ScreeningQuestionType.SINGLE_CHOICE || item.type() == ScreeningQuestionType.MULTIPLE_CHOICE;
+            List<String> options = choice ? trimmed(item.options()) : new ArrayList<>();
+            String expectedAnswer = item.eliminatory() ? blankToNull(item.expectedAnswer()) : null;
             if (question == null) {
                 question = job.addScreeningQuestion();
+            } else if (locked) {
+                String path = "screeningQuestions[" + position + "]";
+                if (question.getType() != item.type()) {
+                    throw fieldError(path + ".type", "job.question.locked");
+                }
+                if (!question.getOptions().equals(options)) {
+                    throw fieldError(path + ".options", "job.question.locked");
+                }
+                if (question.isEliminatory() != item.eliminatory()) {
+                    throw fieldError(path + ".eliminatory", "job.question.locked");
+                }
+                if (!Objects.equals(question.getExpectedAnswer(), expectedAnswer)) {
+                    throw fieldError(path + ".expectedAnswer", "job.question.locked");
+                }
             }
-            boolean choice = item.type() == ScreeningQuestionType.SINGLE_CHOICE || item.type() == ScreeningQuestionType.MULTIPLE_CHOICE;
             question.setPosition(position++);
             question.setQuestion(item.question().trim());
             question.setType(item.type());
-            question.setOptions(choice ? trimmed(item.options()) : new ArrayList<>());
+            question.setOptions(options);
             question.setRequired(item.required());
             question.setEliminatory(item.eliminatory());
-            question.setExpectedAnswer(item.eliminatory() ? blankToNull(item.expectedAnswer()) : null);
+            question.setExpectedAnswer(expectedAnswer);
+        }
+        if (locked && !existing.isEmpty()) {
+            throw fieldError("screeningQuestions", "job.question.locked-delete");
         }
         job.getScreeningQuestions().removeAll(existing.values());
         job.getScreeningQuestions().sort(Comparator.comparingInt(ScreeningQuestion::getPosition));
@@ -464,6 +534,12 @@ public class JobService {
         Map<UUID, JobPipelineCounts> total = new HashMap<>();
         pipelineStats.orderedStream().forEach(contributor -> contributor.countsByJob(jobIds).forEach((id, counts) -> total.merge(id, counts, JobService::sum)));
         return total;
+    }
+
+    /** Whether any application exists for the job (stage 8 lock rules). */
+    private boolean hasApplications(UUID jobId) {
+        JobPipelineCounts counts = pipelineCounts(List.of(jobId)).get(jobId);
+        return counts != null && counts.totalCandidates() > 0;
     }
 
     private static JobPipelineCounts sum(JobPipelineCounts a, JobPipelineCounts b) {

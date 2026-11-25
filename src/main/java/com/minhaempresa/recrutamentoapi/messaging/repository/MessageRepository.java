@@ -16,15 +16,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface MessageRepository extends JpaRepository<Message, UUID>, JpaSpecificationExecutor<Message> {
 
-    // ---- Sending limits ----
+    // ---- Sending limits (automatic sends do not count) ----
 
-    long countBySentByAndCreatedAtAfter(UUID sentBy, Instant after);
+    long countBySentByAndAutomaticFalseAndCreatedAtAfter(UUID sentBy, Instant after);
 
-    Optional<Message> findFirstBySentByAndCreatedAtAfterOrderByCreatedAtAsc(UUID sentBy, Instant after);
+    Optional<Message> findFirstBySentByAndAutomaticFalseAndCreatedAtAfterOrderByCreatedAtAsc(UUID sentBy, Instant after);
 
-    long countByCandidateIdAndCreatedAtAfter(UUID candidateId, Instant after);
+    long countByCandidateIdAndAutomaticFalseAndCreatedAtAfter(UUID candidateId, Instant after);
 
-    Optional<Message> findFirstByCandidateIdAndCreatedAtAfterOrderByCreatedAtAsc(UUID candidateId, Instant after);
+    Optional<Message> findFirstByCandidateIdAndAutomaticFalseAndCreatedAtAfterOrderByCreatedAtAsc(UUID candidateId, Instant after);
 
     // ---- Conversations (one per candidate, the most recent first) ----
 

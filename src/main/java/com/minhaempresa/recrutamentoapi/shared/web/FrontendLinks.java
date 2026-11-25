@@ -45,6 +45,11 @@ public class FrontendLinks {
         return withToken("/confirmar-novo-email", token);
     }
 
+    /** Candidate portal ({@code app.candidate-portal-url}). */
+    public String candidatePortal() {
+        return properties.candidatePortalUrl();
+    }
+
     /** Public contact page. */
     public String contact() {
         return builder("/contacto").toUriString();

@@ -61,18 +61,26 @@ public class Message extends BaseEntity {
     @Column(name = "marketing", nullable = false, updatable = false)
     private boolean marketing;
 
-    /** {@code null} = sent automatically by the system. */
+    /** The user who caused the send (also for automatic ones); {@code null} only without any user (public application). */
     @Column(name = "sent_by", updatable = false)
     private UUID sentBy;
 
     @Column(name = "failure_reason", length = MAX_FAILURE)
     private String failureReason;
 
+    /**
+     * Triggered by the system (automatic action of a stage, bulk action), not written by hand: not counted in
+     * the sending limits. {@link #sentBy} still records the user who caused it, when there is one.
+     */
+    @Column(name = "automatic", nullable = false, updatable = false)
+    private boolean automatic;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     public Message(UUID candidateId, UUID applicationId, MessageChannel channel, String subject, String body,
-            MessageTemplate template, boolean marketing, UUID sentBy, Instant createdAt) {
+            MessageTemplate template, boolean marketing, UUID sentBy, boolean automatic, Instant createdAt) {
+        this.automatic = automatic;
         this.candidateId = candidateId;
         this.applicationId = applicationId;
         this.channel = channel;

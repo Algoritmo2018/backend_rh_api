@@ -310,7 +310,7 @@ class MessageIntegrationTest {
 
         // Automatic messages (pipeline) are not limited
         UUID templateId = template("sms", null, "Olá {{nome}}, a sua candidatura avançou.");
-        MessageResponse automatic = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(), null);
+        MessageResponse automatic = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(), null, true);
         assertThat(automatic.sentById()).isNull();
 
         clock.advance(Duration.ofDays(1).plusSeconds(1));
@@ -346,7 +346,7 @@ class MessageIntegrationTest {
         Candidate ana = candidate("Ana Lopes", true);
         UUID templateId = template("email", "Candidatura: {{vaga}}", "Olá {{nome}}, a vaga {{vaga}} avançou.\n{{recrutador}}");
 
-        MessageResponse sent = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(TemplateVariable.JOB_TITLE, "Técnico de Frio"), null);
+        MessageResponse sent = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(TemplateVariable.JOB_TITLE, "Técnico de Frio"), null, true);
 
         assertThat(sent.channel()).isEqualTo(MessageChannel.EMAIL);
         assertThat(sent.subject()).isEqualTo("Candidatura: Técnico de Frio");
@@ -366,7 +366,7 @@ class MessageIntegrationTest {
 
         // One sent by the recruiter, one automatic (no sender)
         String manual = json(send(asRecruiter, message(ana, "email", "Assunto manual", "Texto")).andExpect(status().isCreated())).path("id").asString();
-        String automatic = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(), null).id().toString();
+        String automatic = messageService.sendFromTemplate(templateId, ana.id(), null, null, Map.of(), null, true).id().toString();
 
         for (Duration delay : List.of(Duration.ZERO, Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(30), Duration.ofHours(2), Duration.ofHours(6))) {
             clock.advance(delay);

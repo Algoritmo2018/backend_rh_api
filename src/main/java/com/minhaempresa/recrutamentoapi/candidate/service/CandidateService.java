@@ -39,6 +39,7 @@ import java.time.Period;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -54,6 +55,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -229,20 +231,69 @@ public class CandidateService {
     /**
      * The candidate of an application (stage 8), by email. An existing candidate is only linked: the
      * application NEVER changes its profile (name, phone, CV…); what was sent stays in the application.
-     * A new candidate is created from the application data.
+     * A new candidate is created from the application data (and its quick profile, if any).
+     *
+     * <p>Two first applications with the same new email at the same time: the email is locked for the rest of
+     * the transaction ({@link #lockApplicantEmail}), so the second waits and links to the candidate the first
+     * one created instead of hitting the unique email.
      */
     @Transactional
     public ApplicantLink findOrCreateForApplication(ApplicantData data) {
-        String email = data.email().trim().toLowerCase(Locale.ROOT);
+        String email = lockApplicantEmail(data.email());
         return repository.findByEmail(email)
                 .map(existing -> new ApplicantLink(existing.getId(), false))
                 .orElseGet(() -> {
                     Candidate created = newCandidate(data.fullName().trim(), email, PhoneNumbers.normalizeOrThrow(data.phone()), data.source());
                     created.setProvince(data.province());
+                    ApplicantQuickProfile quick = data.quickProfile();
+                    if (quick != null) {
+                        created.setHeadline(quick.headline() == null ? "" : quick.headline().trim());
+                        created.setSkills(distinctIgnoringCase(quick.skills() == null ? List.of() : quick.skills()));
+                        created.setDriverLicenses(quick.driverLicenses() == null ? new ArrayList<>()
+                                : quick.driverLicenses().stream().distinct().sorted().map(DriverLicenseCategory::name).collect(Collectors.toCollection(ArrayList::new)));
+                    }
                     refreshDerivedFields(created, today());
                     repository.save(created);
+                    repository.flush();
                     return new ApplicantLink(created.getId(), true);
                 });
+    }
+
+    /**
+     * Serializes the applications (and the account confirmations) of one email until the end of the current
+     * transaction (PostgreSQL advisory lock). Returns the email in lower case.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public String lockApplicantEmail(String email) {
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        repository.lockApplicantEmail(normalized);
+        return normalized;
+    }
+
+    /** The candidate with this email (lower case), if any. */
+    @Transactional(readOnly = true)
+    public Optional<UUID> findIdByEmail(String email) {
+        return repository.findByEmail(email.trim().toLowerCase(Locale.ROOT)).map(Candidate::getId);
+    }
+
+    /** The own profile of a logged-in candidate who applies (409 while the email is not confirmed). */
+    @Transactional
+    public ApplicantProfile ownApplicant(AuthenticatedUser actor) {
+        Candidate candidate = own(actor);
+        return new ApplicantProfile(candidate.getId(), candidate.getFullName(), candidate.getEmail(), candidate.getPhone(),
+                candidate.getProvince(), candidate.getCvDocumentId());
+    }
+
+    /** What the match score may use of a profile (DECISOES.md #20). */
+    @Transactional(readOnly = true)
+    public MatchProfile matchProfileOf(UUID candidateId) {
+        return matchProfile(find(candidateId));
+    }
+
+    /** Whether the candidate is linked to a portal account (an account email cannot be an anonymous applicant's). */
+    @Transactional(readOnly = true)
+    public Optional<UUID> userIdOf(UUID candidateId) {
+        return Optional.ofNullable(find(candidateId).getUserId());
     }
 
     /** Candidate of an application: {@code created} = a new profile was made. */
@@ -256,6 +307,8 @@ public class CandidateService {
     public UUID linkOrCreateForAccount(UUID userId, String email, String name, String phone) {
         Candidate candidate = repository.findByUserId(userId).orElse(null);
         if (candidate == null) {
+            // Same lock as the applications: an application with this email at the same time cannot create a second profile
+            email = lockApplicantEmail(email);
             candidate = repository.findByEmail(email).orElse(null);
             if (candidate != null && candidate.getUserId() != null) {
                 // Emails are unique per account: another account cannot own this candidate

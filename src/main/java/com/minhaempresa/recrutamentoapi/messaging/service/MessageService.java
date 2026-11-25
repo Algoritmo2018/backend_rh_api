@@ -51,7 +51,9 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import com.minhaempresa.recrutamentoapi.messaging.service.MessageApplicationDirectory.ApplicationRef;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
@@ -91,6 +93,7 @@ public class MessageService {
     private final CandidateService candidateService;
     private final ConsentService consentService;
     private final UserService userService;
+    private final ObjectProvider<MessageApplicationDirectory> applicationDirectory;
     private final ApplicationEventPublisher events;
     private final MessagingProperties properties;
     private final AppProperties appProperties;
@@ -131,32 +134,43 @@ public class MessageService {
         CandidateContact candidate = candidateService.getContact(request.candidateId());
         requireConsent(candidate.id(), null, marketing);
         checkLimits(actor.id(), candidate.id());
-        return deliver(candidate, null, request.channel(), subject, body, template, marketing, actor.id(), userService.getById(actor.id()).name(), Map.of());
+        return deliver(candidate, null, request.channel(), subject, body, template, marketing, actor.id(), false, userService.getById(actor.id()).name(), Map.of());
     }
 
     /**
      * Sends an active template to a candidate: the entry point of the automatic actions of the pipeline
      * (stage 8) and of other modules.
      *
-     * @param applicationId the application the message is about ({@code null} until stage 8)
+     * @param applicationId the application the message is about: it must belong to the candidate, gives the
+     *     consent to contact them and the job variables ({@code {{vaga}}}, {@code {{empresa}}}); {@code null}
+     *     = a talent-pool message
      * @param channel {@code null} = the template's channel
-     * @param extraValues values of variables this module cannot know (job, interview…)
-     * @param sentBy the user who caused it, or {@code null} for an automatic send (no sending limits then)
+     * @param extraValues values of variables this module cannot know (interview…); they win over the job ones
+     * @param sentBy the user who caused it (also for automatic sends); {@code null} only when no user did
+     *     (e.g. a public application). A failed email is reported to this user, or to the administrators
+     * @param automatic triggered by the system (stage automatic action, bulk action): not counted in the
+     *     sending limits (stage 8, adjustment 1)
      */
     @Transactional
     public MessageResponse sendFromTemplate(UUID templateId, UUID candidateId, UUID applicationId, MessageChannel channel,
-            Map<TemplateVariable, String> extraValues, UUID sentBy) {
-        requireNoApplication(applicationId);
+            Map<TemplateVariable, String> extraValues, UUID sentBy, boolean automatic) {
         MessageTemplate template = activeTemplate(templateId);
         CandidateContact candidate = candidateService.getContact(candidateId);
+        Map<TemplateVariable, String> values = new EnumMap<>(TemplateVariable.class);
+        if (applicationId != null) {
+            ApplicationRef application = applicationOf(applicationId, candidate.id());
+            values.put(TemplateVariable.JOB_TITLE, application.jobTitle());
+            values.put(TemplateVariable.COMPANY, application.companyName());
+        }
+        values.putAll(extraValues);
         requireConsent(candidate.id(), applicationId, false);
-        if (sentBy != null) {
+        if (sentBy != null && !automatic) {
             checkLimits(sentBy, candidate.id());
         }
         String senderName = sentBy == null ? null : userService.getById(sentBy).name();
         MessageChannel target = channel == null ? template.getChannel() : channel;
         String subject = target == MessageChannel.EMAIL ? template.getSubject() : null;
-        return deliver(candidate, applicationId, target, subject, template.getBody(), template, false, sentBy, senderName, extraValues);
+        return deliver(candidate, applicationId, target, subject, template.getBody(), template, false, sentBy, automatic, senderName, values);
     }
 
     /** Fills the template for one candidate without sending it (variables without a value stay visible). */
@@ -217,7 +231,8 @@ public class MessageService {
     // =====================================================================================
 
     private MessageResponse deliver(CandidateContact candidate, UUID applicationId, MessageChannel requested, String subjectSource,
-            String bodySource, MessageTemplate template, boolean marketing, UUID sentBy, String senderName, Map<TemplateVariable, String> extraValues) {
+            String bodySource, MessageTemplate template, boolean marketing, UUID sentBy, boolean automatic, String senderName,
+            Map<TemplateVariable, String> extraValues) {
         Map<TemplateVariable, String> values = values(candidate, senderName, extraValues);
         requireFilled("subject", subjectSource, values);
         requireFilled("body", bodySource, values);
@@ -229,7 +244,7 @@ public class MessageService {
             throw new BusinessException("message.sms-too-long", List.of(new FieldError("body", "message.sms-too-long", List.of(TemplateValidator.SMS_MAX_LENGTH))));
         }
 
-        Message message = repository.save(new Message(candidate.id(), applicationId, channel, subject, body, template, marketing, sentBy, clock.instant()));
+        Message message = repository.save(new Message(candidate.id(), applicationId, channel, subject, body, template, marketing, sentBy, automatic, clock.instant()));
         switch (channel) {
             case EMAIL -> {
                 RenderedEmail rendered = emailRenderer.renderMessage(subject, body);
@@ -273,7 +288,17 @@ public class MessageService {
                 .orElseThrow(() -> new BusinessException("message.template.invalid", List.of(new FieldError("templateId", "message.template.invalid"))));
     }
 
-    /** Applications arrive in stage 8: until then no message can be linked to one. */
+    /** The application must exist and belong to the candidate (422 on {@code applicationId} otherwise). */
+    private ApplicationRef applicationOf(UUID applicationId, UUID candidateId) {
+        return applicationDirectory.orderedStream()
+                .map(directory -> directory.find(applicationId))
+                .flatMap(Optional::stream)
+                .filter(application -> application.candidateId().equals(candidateId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException("message.application.invalid", List.of(new FieldError("applicationId", "message.application.invalid"))));
+    }
+
+    /** Recruiters link messages to applications from stage 8b ({@code POST /messages}, preview). */
     private static void requireNoApplication(UUID applicationId) {
         if (applicationId != null) {
             throw new BusinessException("message.application.unavailable", List.of(new FieldError("applicationId", "message.application.unavailable")));
@@ -297,12 +322,12 @@ public class MessageService {
         Instant now = clock.instant();
         Duration hour = Duration.ofHours(1);
         Duration day = Duration.ofDays(1);
-        limit(repository.countBySentByAndCreatedAtAfter(senderId, now.minus(hour)), properties.perSenderHour(),
-                () -> repository.findFirstBySentByAndCreatedAtAfterOrderByCreatedAtAsc(senderId, now.minus(hour)), hour, now, "message.rate-limit.sender");
-        limit(repository.countBySentByAndCreatedAtAfter(senderId, now.minus(day)), properties.perSenderDay(),
-                () -> repository.findFirstBySentByAndCreatedAtAfterOrderByCreatedAtAsc(senderId, now.minus(day)), day, now, "message.rate-limit.sender");
-        limit(repository.countByCandidateIdAndCreatedAtAfter(candidateId, now.minus(day)), properties.perCandidateDay(),
-                () -> repository.findFirstByCandidateIdAndCreatedAtAfterOrderByCreatedAtAsc(candidateId, now.minus(day)), day, now, "message.rate-limit.candidate");
+        limit(repository.countBySentByAndAutomaticFalseAndCreatedAtAfter(senderId, now.minus(hour)), properties.perSenderHour(),
+                () -> repository.findFirstBySentByAndAutomaticFalseAndCreatedAtAfterOrderByCreatedAtAsc(senderId, now.minus(hour)), hour, now, "message.rate-limit.sender");
+        limit(repository.countBySentByAndAutomaticFalseAndCreatedAtAfter(senderId, now.minus(day)), properties.perSenderDay(),
+                () -> repository.findFirstBySentByAndAutomaticFalseAndCreatedAtAfterOrderByCreatedAtAsc(senderId, now.minus(day)), day, now, "message.rate-limit.sender");
+        limit(repository.countByCandidateIdAndAutomaticFalseAndCreatedAtAfter(candidateId, now.minus(day)), properties.perCandidateDay(),
+                () -> repository.findFirstByCandidateIdAndAutomaticFalseAndCreatedAtAfterOrderByCreatedAtAsc(candidateId, now.minus(day)), day, now, "message.rate-limit.candidate");
     }
 
     /** Over the limit → 429, retry when the oldest message of the window leaves it. */

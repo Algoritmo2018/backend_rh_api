@@ -59,6 +59,22 @@ public class ConsentService {
         return list(candidateId);
     }
 
+    /**
+     * Consents given with an application (stage 8): the job-application consent for that job (required) with
+     * the consent text version in force, and the talent-pool consent when asked and not active yet (a new
+     * history row; the talent-pool mirror follows). Never revokes anything.
+     */
+    @Transactional
+    public void recordApplicationConsents(UUID candidateId, UUID jobId, boolean talentPool) {
+        String version = companySettings.get().consentTextVersion();
+        repository.save(new Consent(candidateId, ConsentType.JOB_APPLICATION, jobId, version, clock.instant()));
+        if (talentPool && repository.findByCandidateIdAndTypeAndJobIdIsNullAndRevokedAtIsNull(candidateId, ConsentType.TALENT_POOL).isEmpty()) {
+            repository.save(new Consent(candidateId, ConsentType.TALENT_POOL, null, version, clock.instant()));
+            candidateService.setInTalentPool(candidateId, true);
+        }
+        repository.flush();
+    }
+
     /** Whether the candidate has an active (not revoked) general consent of this type (talent pool, marketing). */
     @Transactional(readOnly = true)
     public boolean hasActive(UUID candidateId, ConsentType type) {

@@ -15,6 +15,14 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID>, Can
     /** {@code email} must already be lower case. */
     Optional<Candidate> findByEmail(String email);
 
+    /**
+     * Transaction-scoped PostgreSQL advisory lock on an applicant's email (lower case): two applications with the
+     * same email are processed one after the other, so the second sees the candidate (and the application) the
+     * first one created. Released at the end of the transaction. Namespace 8 = applications.
+     */
+    @Query(value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(8, hashtext(:email))) AS locked", nativeQuery = true)
+    Integer lockApplicantEmail(@Param("email") String email);
+
     /** Every skill written in a profile, without repetitions (suggestions of the skill inputs). */
     @Query(value = "SELECT DISTINCT skill FROM candidates, unnest(skills) AS skill ORDER BY skill LIMIT 1000", nativeQuery = true)
     List<String> findDistinctSkills();

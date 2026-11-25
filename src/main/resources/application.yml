@@ -129,6 +129,11 @@ app:
       password-confirmation: { max: 10, window: 15m }
       # Candidate email-change requests, per user and per new address
       email-change: { max: 5, window: 1h }
+  applications:
+    # Public application form (CGNAT: per-IP generous); per applicant email also for logged-in candidates
+    rate-limits:
+      per-ip: { max: 60, window: 1h }
+      per-email: { max: 10, window: 1h }
   contact:
     # Public forms "Precisa de recrutar?" and Contacto (CGNAT: per-IP generous, per-email strict)
     rate-limits:

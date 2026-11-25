@@ -121,6 +121,50 @@ public class DocumentService {
         return mapper.toDocumentResponse(document);
     }
 
+    /**
+     * Checks the CV sent with an application (5 MB; PDF, DOCX, PNG, JPEG by content) before anything is
+     * stored. Errors are on {@code field}.
+     */
+    public void checkApplicationCv(byte[] content, String field) {
+        detectCv(content, field);
+    }
+
+    /**
+     * Stores the CV of an application as a document of the candidate (stage 8, D8-2), after the virus scan.
+     * It becomes the profile's current CV only with {@code makeCurrent} (a profile created by this
+     * application); an existing profile is never changed by an application.
+     *
+     * @return the id of the new document
+     */
+    @Transactional
+    public UUID storeApplicationCv(UUID candidateId, String originalName, byte[] content, boolean makeCurrent, String field) {
+        FileType fileType = detectCv(content, field);
+        fileScanner.scan(content);
+        StoredFile stored = storage.store("documents", fileType, content);
+        storageCleanup.deleteIfRolledBack(stored.key());
+        CandidateDocument document = repository.save(new CandidateDocument(candidateId, DocumentType.CV, safeFileName(originalName, fileType), fileType.mimeType(),
+                stored.sizeBytes(), stored.key(), stored.sha256(), null, null, clock.instant()));
+        if (makeCurrent) {
+            findCandidate(candidateId).setCvDocumentId(document.getId());
+        }
+        repository.flush();
+        return document.getId();
+    }
+
+    private static FileType detectCv(byte[] content, String field) {
+        DocumentType type = DocumentType.CV;
+        if (content == null || content.length == 0) {
+            throw fieldError(field, "document.file.required");
+        }
+        if (content.length > type.maxBytes()) {
+            long megabytes = type.maxBytes() / (1024 * 1024);
+            throw new BusinessException("document.too-large", List.of(new FieldError(field, "document.too-large", List.of(megabytes))), megabytes);
+        }
+        return FileType.detect(content)
+                .filter(type.acceptedFormats()::contains)
+                .orElseThrow(() -> fieldError(field, "document.invalid-type"));
+    }
+
     /** Removes an own document (not an approved one); its file leaves the bucket after the commit. */
     @Transactional
     public void deleteMine(AuthenticatedUser actor, UUID id) {

@@ -9,7 +9,8 @@ import java.util.UUID;
 /**
  * Frontend {@code Message} plus {@code templateCode}: the snapshot of what was sent.
  *
- * @param sentById {@code null} = sent automatically by the system
+ * @param sentById the user who caused the send; {@code null} only when no user did (public application)
+ * @param automatic triggered by the system (stage automatic action, bulk action), not written by hand
  */
 public record MessageResponse(
         UUID id,
@@ -23,4 +24,5 @@ public record MessageResponse(
         UUID templateId,
         String templateCode,
         UUID sentById,
+        boolean automatic,
         Instant createdAt) {}

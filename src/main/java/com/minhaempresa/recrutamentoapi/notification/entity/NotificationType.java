@@ -10,7 +10,8 @@ public enum NotificationType implements WireEnum {
     JOB_REQUEST_REVIEWED("job_request_reviewed"),
     CONTACT_REQUEST_RECEIVED("contact_request_received"),
     JOB_ASSIGNED("job_assigned"),
-    EMAIL_FAILED("email_failed");
+    EMAIL_FAILED("email_failed"),
+    APPLICATION_RECEIVED("application_received");
 
     private final String value;
 
