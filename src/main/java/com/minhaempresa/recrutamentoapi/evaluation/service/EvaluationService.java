@@ -184,8 +184,9 @@ public class EvaluationService {
             throw new BusinessException("evaluation.not-submitted");
         }
         String reason = request.reason().trim();
+        // The copy of the submitted evaluation is taken before it goes back to pending
+        reopenings.save(new EvaluationReopening(evaluation, actor.id(), reason, clock.instant()));
         evaluation.reopen();
-        reopenings.save(new EvaluationReopening(evaluation.getId(), actor.id(), reason, clock.instant()));
         repository.flush();
         UserReference evaluator = userService.referencesOf(List.of(evaluation.getEvaluatorId())).get(evaluation.getEvaluatorId());
         if (evaluator != null && evaluator.active() && !evaluator.id().equals(actor.id())) {
@@ -208,7 +209,7 @@ public class EvaluationService {
             return;
         }
         reopenings.findByEvaluationIdInOrderByReopenedAtDescIdDesc(evaluations.stream().map(Evaluation::getId).toList())
-                .forEach(EvaluationReopening::eraseReason);
+                .forEach(EvaluationReopening::eraseTexts);
         for (Evaluation evaluation : evaluations) {
             if (!evaluation.isSubmitted() && evaluation.getScores().isEmpty()) {
                 repository.delete(evaluation);
@@ -296,7 +297,7 @@ public class EvaluationService {
             InterviewSummary interview = e.getInterviewId() == null ? null : interviews.get(e.getInterviewId());
             List<EvaluationResponse.Reopening> reopened = history.getOrDefault(e.getId(), List.of()).stream()
                     .map(r -> new EvaluationResponse.Reopening(r.getReason(), r.getReopenedBy(),
-                            r.getReopenedBy() == null ? null : names.get(r.getReopenedBy()), r.getReopenedAt()))
+                            r.getReopenedBy() == null ? null : names.get(r.getReopenedBy()), r.getReopenedAt(), mapper.toPrevious(r)))
                     .toList();
             return mapper.toResponse(e, new EvaluationMapper.Refs(
                     candidate == null ? "—" : candidate.fullName(),

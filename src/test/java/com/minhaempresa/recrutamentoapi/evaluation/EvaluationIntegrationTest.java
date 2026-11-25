@@ -329,6 +329,18 @@ class EvaluationIntegrationTest {
         assertThat(reopened.path("reopenings")).hasSize(1);
         assertThat(reopened.path("reopenings").get(0).path("reason").asString()).isEqualTo("Falta avaliar a comunicação.");
         assertThat(reopened.path("reopenings").get(0).path("reopenedById").asString()).isEqualTo(admin.id().toString());
+        // Copy of the evaluation as it was submitted (audit)
+        JsonNode previous = reopened.path("reopenings").get(0).path("previous");
+        assertThat(previous.path("recommendation").asString()).isEqualTo("yes");
+        assertThat(previous.path("overallScore").decimalValue()).isEqualByComparingTo(new BigDecimal("4"));
+        assertThat(previous.path("strengths").asString()).isEqualTo("Boa experiência em soldadura TIG.");
+        assertThat(previous.path("concerns").asString()).isEqualTo("Pouca experiência offshore.");
+        assertThat(previous.path("notes").asString()).isEqualTo("Pediu salário acima da média.");
+        assertThat(previous.path("submittedAt").asString()).isNotBlank();
+        assertThat(previous.path("scores")).hasSize(1);
+        assertThat(previous.path("scores").get(0).path("comment").asString()).isEqualTo("Comentário 0");
+        assertThat(json(read("/api/v1/evaluations/" + id, recruiter)).path("reopenings").get(0).path("previous").path("notes").asString())
+                .isEqualTo("Pediu salário acima da média.");
         assertThat(Bell.of(jdbc, first.id()).getFirst()).satisfies(bell -> {
             assertThat(bell.type()).isEqualTo("EVALUATION_REOPENED");
             assertThat(bell.body()).contains("Falta avaliar a comunicação.");
@@ -337,8 +349,12 @@ class EvaluationIntegrationTest {
         // The evaluator does not see the history; they submit again, and a second reopening is added (never overwritten)
         assertThat(json(read("/api/v1/evaluations/" + id, first)).path("reopenings")).isEmpty();
         send("POST", "/api/v1/evaluations/" + id + "/submit", first, scorecard(3, 4)).andExpect(status().isOk());
-        send("POST", reopen, admin, Map.of("reason", "Rever a recomendação final.")).andExpect(status().isOk());
+        JsonNode again = json(send("POST", reopen, admin, Map.of("reason", "Rever a recomendação final.")).andExpect(status().isOk()));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM evaluation_reopenings WHERE evaluation_id = ?::uuid", Integer.class, id)).isEqualTo(2);
+        // Newest first: the second copy has the second submission (3 and 4 → 3.5), the first one is unchanged
+        assertThat(again.path("reopenings").get(0).path("previous").path("overallScore").decimalValue()).isEqualByComparingTo(new BigDecimal("3.5"));
+        assertThat(again.path("reopenings").get(0).path("previous").path("scores")).hasSize(2);
+        assertThat(again.path("reopenings").get(1).path("previous").path("overallScore").decimalValue()).isEqualByComparingTo(new BigDecimal("4"));
     }
 
     @Test
@@ -365,8 +381,21 @@ class EvaluationIntegrationTest {
                 .containsExactly(4, 5);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM evaluation_scores WHERE evaluation_id = ?::uuid AND comment IS NOT NULL", Integer.class, submitted))
                 .isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM evaluation_reopenings WHERE evaluation_id = ?::uuid AND reason IS NOT NULL", Integer.class, submitted))
-                .isZero();
+        Map<String, Object> copy = jdbc.queryForMap("""
+                SELECT reason, previous_recommendation, previous_overall_score, previous_strengths, previous_concerns, previous_notes
+                FROM evaluation_reopenings WHERE evaluation_id = ?::uuid""", submitted);
+        assertThat(copy.get("reason")).isNull();
+        assertThat(copy.get("previous_strengths")).isNull();
+        assertThat(copy.get("previous_concerns")).isNull();
+        assertThat(copy.get("previous_notes")).isNull();
+        assertThat(copy.get("previous_recommendation")).isEqualTo("YES");
+        assertThat((BigDecimal) copy.get("previous_overall_score")).isEqualByComparingTo(new BigDecimal("4.5"));
+        assertThat(jdbc.queryForList("""
+                SELECT s.score FROM evaluation_reopening_scores s JOIN evaluation_reopenings r ON r.id = s.reopening_id
+                WHERE r.evaluation_id = ?::uuid ORDER BY s.position""", Integer.class, submitted)).containsExactly(4, 5);
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM evaluation_reopening_scores s JOIN evaluation_reopenings r ON r.id = s.reopening_id
+                WHERE r.evaluation_id = ?::uuid AND s.comment IS NOT NULL""", Integer.class, submitted)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM evaluations WHERE id = ?::uuid", Integer.class, pending)).isZero();
     }
 }

@@ -43,6 +43,13 @@ public record EvaluationResponse(
 
     public record InterviewRef(UUID id, InterviewType type, Instant startsAt, InterviewMode mode) {}
 
-    /** @param reason {@code null} after the candidate's erasure */
-    public record Reopening(String reason, UUID reopenedById, String reopenedByName, Instant reopenedAt) {}
+    /**
+     * @param reason {@code null} after the candidate's erasure
+     * @param previous the evaluation as it was submitted before this reopening (audit)
+     */
+    public record Reopening(String reason, UUID reopenedById, String reopenedByName, Instant reopenedAt, Previous previous) {}
+
+    /** Copy of a submitted evaluation kept by a reopening; the texts are {@code null} after the candidate's erasure. */
+    public record Previous(List<Score> scores, BigDecimal overallScore, Recommendation recommendation, String strengths, String concerns, String notes,
+            Instant submittedAt) {}
 }

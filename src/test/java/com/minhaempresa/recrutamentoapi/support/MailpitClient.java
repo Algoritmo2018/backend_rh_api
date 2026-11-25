@@ -60,6 +60,19 @@ public class MailpitClient {
         return idsTo(address).size();
     }
 
+    /**
+     * Emails to an address whose subject contains {@code subject}, newest first. For addresses that also receive the
+     * emails "to every administrator" of other tests (the bootstrap administrator): never rely on the newest email.
+     */
+    public List<Email> emailsTo(String address, String subject) {
+        String body = http.get().uri("/api/v1/search?query={q}", "to:\"" + address + "\" subject:\"" + subject + "\"").retrieve().body(String.class);
+        List<Email> emails = new ArrayList<>();
+        for (JsonNode message : json.readTree(body).path("messages")) {
+            emails.add(read(message.path("ID").asString()));
+        }
+        return emails;
+    }
+
     /** Waits until at least {@code count} emails reached the address and returns the newest one. */
     public Email awaitEmailTo(String address, int count) {
         await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(200)).until(() -> countTo(address) >= count);

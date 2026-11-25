@@ -1,6 +1,7 @@
 package com.minhaempresa.recrutamentoapi.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -30,6 +31,8 @@ class InvitationIntegrationTest {
 
     /** Configured in application-test.yml (app.bootstrap.admin). */
     private static final String BOOTSTRAP_ADMIN = "bootstrap-admin@fehoiram.test";
+
+    private static final String INVITATION_SUBJECT = "Convite para o portal de recrutamento FEH OIRAM";
 
     @Autowired
     MockMvc mvc;
@@ -102,28 +105,46 @@ class InvitationIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Este utilizador já ativou a conta."));
     }
 
+    /*
+     * The bootstrap administrator is active without a password, so it also receives the emails "to every
+     * administrator" sent by other test classes, and some of them empty Mailpit. These tests never read its newest
+     * email nor count all its emails (that depended on the test order): they check the invitation token in the
+     * database and count only the invitation emails.
+     */
+
     @Test
     void bootstrapAdministratorWasCreatedWithoutPasswordAndInvited() {
         User bootstrap = userRepository.findByEmail(BOOTSTRAP_ADMIN).orElseThrow();
 
         assertThat(bootstrap.getRole()).isEqualTo(UserRole.ADMIN);
         assertThat(bootstrap.hasPassword()).isFalse();
-        assertThat(mailpit.awaitEmailTo(BOOTSTRAP_ADMIN).subject()).isEqualTo("Convite para o portal de recrutamento FEH OIRAM");
+        assertThat(invitationTokens(bootstrap)).as("invited at startup").isPositive();
     }
 
     @Test
     void bootstrapReinvitesOnStartupWhenTheInvitationExpired() throws Exception {
-        // The runner only acts while no administrator has a password
-        jdbc.update("DELETE FROM users WHERE role = 'ADMIN' AND password_hash IS NOT NULL");
-        mailpit.awaitEmailTo(BOOTSTRAP_ADMIN);
-        int before = mailpit.countTo(BOOTSTRAP_ADMIN);
+        User bootstrap = userRepository.findByEmail(BOOTSTRAP_ADMIN).orElseThrow();
+        // The runner only acts while no administrator has a password. The administrators of other tests are kept
+        // (they may be referenced by their records) without password and inactive (no emails "to every administrator").
+        jdbc.update("UPDATE users SET password_hash = NULL, active = FALSE WHERE role = 'ADMIN' AND password_hash IS NOT NULL");
+        // A valid invitation (the one of the startup, or of an earlier run of this test)
+        bootstrapRunner.run(null);
+        int tokens = invitationTokens(bootstrap);
+        int emails = mailpit.emailsTo(BOOTSTRAP_ADMIN, INVITATION_SUBJECT).size();
 
         bootstrapRunner.run(null);
-        assertThat(mailpit.countTo(BOOTSTRAP_ADMIN)).as("invitation still valid: nothing sent").isEqualTo(before);
+        assertThat(invitationTokens(bootstrap)).as("invitation still valid: nothing sent").isEqualTo(tokens);
 
         clock.advance(Duration.ofDays(8));
         bootstrapRunner.run(null);
 
-        mailpit.awaitEmailTo(BOOTSTRAP_ADMIN, before + 1);
+        assertThat(invitationTokens(bootstrap)).isEqualTo(tokens + 1);
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(200))
+                .until(() -> mailpit.emailsTo(BOOTSTRAP_ADMIN, INVITATION_SUBJECT).size() > emails);
+        assertThat(mailpit.emailsTo(BOOTSTRAP_ADMIN, INVITATION_SUBJECT).getFirst().text()).contains("/aceitar-convite?token=");
+    }
+
+    private int invitationTokens(User user) {
+        return jdbc.queryForObject("SELECT count(*) FROM one_time_tokens WHERE user_id = ? AND type = 'INVITATION'", Integer.class, user.getId());
     }
 }
