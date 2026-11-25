@@ -10,19 +10,25 @@ import com.minhaempresa.recrutamentoapi.notification.entity.EmailPurpose;
  * @param subject email subject ({@code null} for SMS/WhatsApp)
  * @param textBody plain-text body (the whole message for SMS/WhatsApp)
  * @param htmlBody HTML body (email only, may be {@code null})
+ * @param attachment text attachment (email only, may be {@code null}), e.g. a calendar invitation
  */
-public record OutboundNotification(NotificationChannel channel, EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody) {
+public record OutboundNotification(NotificationChannel channel, EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody,
+        EmailAttachment attachment) {
 
     public static OutboundNotification email(EmailPurpose purpose, String to, String subject, String textBody, String htmlBody) {
-        return new OutboundNotification(NotificationChannel.EMAIL, purpose, to, subject, textBody, htmlBody);
+        return email(purpose, to, subject, textBody, htmlBody, null);
+    }
+
+    public static OutboundNotification email(EmailPurpose purpose, String to, String subject, String textBody, String htmlBody, EmailAttachment attachment) {
+        return new OutboundNotification(NotificationChannel.EMAIL, purpose, to, subject, textBody, htmlBody, attachment);
     }
 
     public static OutboundNotification sms(String phone, String text) {
-        return new OutboundNotification(NotificationChannel.SMS, null, phone, null, text, null);
+        return new OutboundNotification(NotificationChannel.SMS, null, phone, null, text, null, null);
     }
 
     public static OutboundNotification whatsapp(String phone, String text) {
-        return new OutboundNotification(NotificationChannel.WHATSAPP, null, phone, null, text, null);
+        return new OutboundNotification(NotificationChannel.WHATSAPP, null, phone, null, text, null, null);
     }
 
     @Override

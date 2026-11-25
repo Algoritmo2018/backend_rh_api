@@ -85,6 +85,11 @@ public class FrontendLinks {
         return builder("/app/entrevistas").toUriString();
     }
 
+    /** Client portal agenda of client interviews (stage 9). */
+    public String clientPortalInterviews() {
+        return builder("/cliente/entrevistas").toUriString();
+    }
+
     /** Messages page of the internal panel (administrators and recruiters). */
     public String messages() {
         return builder("/app/mensagens").toUriString();

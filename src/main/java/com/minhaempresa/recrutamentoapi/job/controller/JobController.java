@@ -62,7 +62,7 @@ public class JobController {
     }
 
     @PatchMapping("/{id}/status")
-    public JobResponse changeStatus(@PathVariable UUID id, @Valid @RequestBody JobStatusRequest request) {
-        return jobService.changeStatus(id, request);
+    public JobResponse changeStatus(@PathVariable UUID id, @Valid @RequestBody JobStatusRequest request, AuthenticatedUser actor) {
+        return jobService.changeStatus(id, request, actor);
     }
 }

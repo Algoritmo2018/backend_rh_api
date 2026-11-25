@@ -2,6 +2,8 @@ package com.minhaempresa.recrutamentoapi.settings.service;
 
 import com.minhaempresa.recrutamentoapi.messaging.dto.response.MessageTemplateResponse;
 import com.minhaempresa.recrutamentoapi.messaging.service.MessageTemplateService;
+import com.minhaempresa.recrutamentoapi.messaging.validation.TemplateValidator;
+import com.minhaempresa.recrutamentoapi.messaging.validation.TemplateVariable;
 import com.minhaempresa.recrutamentoapi.settings.dto.request.PipelineStageUpdateRequest;
 import com.minhaempresa.recrutamentoapi.settings.dto.request.StageAutoActionRequest;
 import com.minhaempresa.recrutamentoapi.settings.dto.response.PipelineStageResponse;
@@ -13,14 +15,18 @@ import com.minhaempresa.recrutamentoapi.shared.config.CacheNames;
 import com.minhaempresa.recrutamentoapi.shared.domain.PipelineStageKey;
 import com.minhaempresa.recrutamentoapi.shared.exception.ApiException.FieldError;
 import com.minhaempresa.recrutamentoapi.shared.exception.BusinessException;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -103,7 +109,24 @@ public class PipelineStageService {
         if (action.channel() != null && action.channel() != template.channel()) {
             throw new BusinessException("error.validation", List.of(new FieldError("[" + index + "].autoAction.channel", "settings.stages.channel-mismatch")));
         }
+        if (usesUnavailableVariables(template)) {
+            // D9-1: the interview (or offer) data is unknown when an application changes stage
+            throw new BusinessException("error.validation", List.of(new FieldError(field, "settings.stages.template-needs-context")));
+        }
         return template.id();
+    }
+
+    /** Variables a stage change cannot fill: interview (stage 9) and offer (stage 11) data. */
+    private static final Set<TemplateVariable> NOT_AVAILABLE_ON_MOVE = EnumSet.of(TemplateVariable.INTERVIEW_DATE, TemplateVariable.INTERVIEW_LOCATION,
+            TemplateVariable.POSITION, TemplateVariable.SALARY, TemplateVariable.START_DATE, TemplateVariable.BENEFITS);
+
+    private static boolean usesUnavailableVariables(MessageTemplateResponse template) {
+        return Stream.of(template.subject(), template.body())
+                .filter(Objects::nonNull)
+                .flatMap(text -> TemplateValidator.variablesIn(text).stream())
+                .map(TemplateVariable::fromPlaceholder)
+                .flatMap(Optional::stream)
+                .anyMatch(NOT_AVAILABLE_ON_MOVE::contains);
     }
 
     private Map<UUID, MessageTemplateResponse> activeTemplates() {

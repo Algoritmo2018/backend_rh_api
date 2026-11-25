@@ -108,7 +108,11 @@ class CatalogIntegrationTest {
             assertThat(stages.get(0).path("autoAction").path("type").asString()).isEqualTo("send_message");
             assertThat(stages.get(0).path("autoAction").path("channel").asString()).isEqualTo("email");
             assertThat(stages.get(1).path("autoAction").path("type").asString()).isEqualTo("none");
-            assertThat(stages.get(2).path("autoAction").path("channel").asString()).isEqualTo("whatsapp");
+            // D9-1: the interview and offer stages have no automatic action by default (their data is unknown on a move)
+            assertThat(stages.get(2).path("autoAction").path("type").asString()).isEqualTo("none");
+            assertThat(stages.get(4).path("autoAction").path("type").asString()).isEqualTo("none");
+            assertThat(stages.get(5).path("autoAction").path("type").asString()).isEqualTo("none");
+            assertThat(stages.get(6).path("autoAction").path("type").asString()).isEqualTo("send_message");
         }
 
         @Test
@@ -121,7 +125,8 @@ class CatalogIntegrationTest {
 
             assertThat(jdbc.queryForObject("SELECT count(*) FROM tags WHERE name = 'Experiência offshore' AND color = 'INDIGO'", Integer.class)).isEqualTo(1);
             assertThat(jdbc.queryForList("SELECT code FROM message_templates WHERE is_system ORDER BY code", String.class))
-                    .containsExactly("documents-wa", "offer-email", "rejection-email", "test-invite-email");
+                    .containsExactly("documents-wa", "interview-cancelled-email", "interview-invite-email", "interview-invite-wa", "interview-slots-email",
+                            "offer-email", "rejection-email", "test-invite-email");
             assertThat(jdbc.queryForObject("SELECT code FROM offer_templates WHERE is_default", String.class)).isEqualTo("standard");
         }
 
@@ -200,6 +205,15 @@ class CatalogIntegrationTest {
             api.sendJson("PUT", "/api/v1/settings/stages", users.accessToken(admin), request)
                     .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.errors[0].message").value("Escolha um modelo de mensagem ativo."));
+
+            // A template that needs the interview (or offer) data cannot be a stage automatic action (D9-1)
+            request.get(1).put("autoAction", Map.of("type", "none"));
+            UUID interviewInvite = jdbc.queryForObject("SELECT id FROM message_templates WHERE code = 'interview-invite-wa'", UUID.class);
+            request.get(2).put("autoAction", Map.of("type", "send_message", "templateId", interviewInvite.toString()));
+            api.sendJson("PUT", "/api/v1/settings/stages", users.accessToken(admin), request)
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.errors[0].field").value("[2].autoAction.templateId"));
+            request.get(2).put("autoAction", Map.of("type", "none"));
 
             request.get(1).put("autoAction", Map.of("type", "send_message", "templateId", smsTemplate.toString()));
             api.sendJson("PUT", "/api/v1/settings/stages", users.accessToken(admin), request)

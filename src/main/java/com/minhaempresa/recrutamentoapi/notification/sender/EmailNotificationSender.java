@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
 
 /**
@@ -36,7 +37,7 @@ public class EmailNotificationSender implements NotificationSender {
         ResolvedSender resolved = registry.forPurpose(notification.purpose() == null ? EmailPurpose.SYSTEM : notification.purpose());
         try {
             MimeMessage message = resolved.sender().createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, notification.htmlBody() != null, StandardCharsets.UTF_8.name());
+            MimeMessageHelper helper = new MimeMessageHelper(message, notification.htmlBody() != null || notification.attachment() != null, StandardCharsets.UTF_8.name());
             helper.setFrom(resolved.from());
             helper.setTo(MailHeaders.address(notification.recipient(), null));
             if (resolved.replyTo() != null) {
@@ -47,6 +48,10 @@ public class EmailNotificationSender implements NotificationSender {
                 helper.setText(notification.textBody(), notification.htmlBody());
             } else {
                 helper.setText(notification.textBody());
+            }
+            EmailAttachment attachment = notification.attachment();
+            if (attachment != null) {
+                helper.addAttachment(attachment.fileName(), new ByteArrayResource(attachment.content().getBytes(StandardCharsets.UTF_8)), attachment.contentType());
             }
             resolved.sender().send(message);
             log.info("Email sent ({})", notification.purpose());

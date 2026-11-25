@@ -25,6 +25,7 @@ import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer
 import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer.RenderedEmail;
 import com.minhaempresa.recrutamentoapi.notification.entity.EmailPurpose;
 import com.minhaempresa.recrutamentoapi.notification.sender.MailHeaders;
+import com.minhaempresa.recrutamentoapi.notification.sender.EmailAttachment;
 import com.minhaempresa.recrutamentoapi.notification.service.EmailOutbox;
 import com.minhaempresa.recrutamentoapi.shared.config.AppProperties;
 import com.minhaempresa.recrutamentoapi.shared.exception.ApiException.FieldError;
@@ -136,7 +137,7 @@ public class MessageService {
         requireConsent(candidate.id(), request.applicationId(), marketing);
         checkLimits(actor.id(), candidate.id());
         return deliver(candidate, request.applicationId(), request.channel(), subject, body, template, marketing, actor.id(), false,
-                userService.getById(actor.id()).name(), jobValues);
+                userService.getById(actor.id()).name(), jobValues, null);
     }
 
     /**
@@ -156,6 +157,16 @@ public class MessageService {
     @Transactional
     public MessageResponse sendFromTemplate(UUID templateId, UUID candidateId, UUID applicationId, MessageChannel channel,
             Map<TemplateVariable, String> extraValues, UUID sentBy, boolean automatic) {
+        return sendFromTemplate(templateId, candidateId, applicationId, channel, extraValues, sentBy, automatic, null);
+    }
+
+    /**
+     * Same as {@link #sendFromTemplate(UUID, UUID, UUID, MessageChannel, Map, UUID, boolean)} with an attachment for an
+     * email (e.g. the {@code .ics} of an interview, stage 9); ignored for SMS/WhatsApp.
+     */
+    @Transactional
+    public MessageResponse sendFromTemplate(UUID templateId, UUID candidateId, UUID applicationId, MessageChannel channel,
+            Map<TemplateVariable, String> extraValues, UUID sentBy, boolean automatic, EmailAttachment attachment) {
         MessageTemplate template = activeTemplate(templateId);
         CandidateContact candidate = candidateService.getContact(candidateId);
         Map<TemplateVariable, String> values = new EnumMap<>(TemplateVariable.class);
@@ -168,7 +179,7 @@ public class MessageService {
         String senderName = sentBy == null ? null : userService.getById(sentBy).name();
         MessageChannel target = channel == null ? template.getChannel() : channel;
         String subject = target == MessageChannel.EMAIL ? template.getSubject() : null;
-        return deliver(candidate, applicationId, target, subject, template.getBody(), template, false, sentBy, automatic, senderName, values);
+        return deliver(candidate, applicationId, target, subject, template.getBody(), template, false, sentBy, automatic, senderName, values, attachment);
     }
 
     /** Fills the template for one candidate without sending it (variables without a value stay visible). */
@@ -230,7 +241,7 @@ public class MessageService {
 
     private MessageResponse deliver(CandidateContact candidate, UUID applicationId, MessageChannel requested, String subjectSource,
             String bodySource, MessageTemplate template, boolean marketing, UUID sentBy, boolean automatic, String senderName,
-            Map<TemplateVariable, String> extraValues) {
+            Map<TemplateVariable, String> extraValues, EmailAttachment attachment) {
         Map<TemplateVariable, String> values = values(candidate, senderName, extraValues);
         requireFilled("subject", subjectSource, values);
         requireFilled("body", bodySource, values);
@@ -246,7 +257,7 @@ public class MessageService {
         switch (channel) {
             case EMAIL -> {
                 RenderedEmail rendered = emailRenderer.renderMessage(subject, body);
-                outbox.enqueue(EmailPurpose.RECRUITMENT, candidate.email(), subject, rendered.text(), rendered.html(), message.getId(), sentBy);
+                outbox.enqueue(EmailPurpose.RECRUITMENT, candidate.email(), subject, rendered.text(), rendered.html(), message.getId(), sentBy, attachment);
             }
             case SMS -> events.publishEvent(new MessageDispatchEvent(message.getId(), channel, candidate.phone(), body));
             case WHATSAPP -> events.publishEvent(new MessageDispatchEvent(message.getId(), channel, candidate.whatsapp(), body));

@@ -1,6 +1,7 @@
 package com.minhaempresa.recrutamentoapi.notification.entity;
 
 import com.minhaempresa.recrutamentoapi.shared.persistence.BaseEntity;
+import com.minhaempresa.recrutamentoapi.notification.sender.EmailAttachment;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -72,6 +73,16 @@ public class OutboundEmail extends BaseEntity {
     @Column(name = "reference_id", updatable = false)
     private UUID referenceId;
 
+    /** Optional text attachment (e.g. the {@code .ics} of an interview). */
+    @Column(name = "attachment_name", length = 100, updatable = false)
+    private String attachmentName;
+
+    @Column(name = "attachment_content_type", length = 100, updatable = false)
+    private String attachmentContentType;
+
+    @Column(name = "attachment_content", columnDefinition = "text", updatable = false)
+    private String attachmentContent;
+
     /** Told in the bell if the email fails for good; {@code null} = the administrators. */
     @Column(name = "notify_user_id", updatable = false)
     private UUID notifyUserId;
@@ -91,6 +102,21 @@ public class OutboundEmail extends BaseEntity {
         this.htmlBody = htmlBody;
         this.createdAt = now;
         this.nextAttemptAt = now;
+    }
+
+    /** Adds the attachment before the email is saved. */
+    public OutboundEmail withAttachment(EmailAttachment attachment) {
+        if (attachment != null) {
+            attachmentName = attachment.fileName();
+            attachmentContentType = attachment.contentType();
+            attachmentContent = attachment.content();
+        }
+        return this;
+    }
+
+    /** The attachment, or {@code null}. */
+    public EmailAttachment attachment() {
+        return attachmentName == null ? null : new EmailAttachment(attachmentName, attachmentContentType, attachmentContent);
     }
 
     public void markSent(Instant now) {

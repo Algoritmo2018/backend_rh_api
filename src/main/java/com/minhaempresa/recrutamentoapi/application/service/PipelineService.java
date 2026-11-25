@@ -12,11 +12,13 @@ import com.minhaempresa.recrutamentoapi.application.dto.response.ClientCommentRe
 import com.minhaempresa.recrutamentoapi.application.dto.response.ShareResponse;
 import com.minhaempresa.recrutamentoapi.application.entity.ClientComment;
 import com.minhaempresa.recrutamentoapi.application.entity.ClientDecision;
+import com.minhaempresa.recrutamentoapi.application.event.ApplicationsClosedEvent;
 import com.minhaempresa.recrutamentoapi.application.event.CandidatesSharedEvent;
 import com.minhaempresa.recrutamentoapi.application.event.ClientCommentAddedEvent;
 import com.minhaempresa.recrutamentoapi.application.repository.ClientCommentRepository;
 import com.minhaempresa.recrutamentoapi.candidate.service.DocumentService;
 import com.minhaempresa.recrutamentoapi.settings.service.CompanySettingsService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import com.minhaempresa.recrutamentoapi.application.dto.response.ApplicationResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.AddToJobResponse;
@@ -141,6 +143,7 @@ public class PipelineService {
     private final CompanySettingsService companySettings;
     private final DocumentService documentService;
     private final ApplicationEventPublisher events;
+    private final ObjectProvider<InterviewerApplicationAccess> interviewAccess;
     private final ApplicationProperties properties;
     private final Messages messages;
     private final Clock clock;
@@ -160,7 +163,7 @@ public class PipelineService {
     @Transactional(readOnly = true)
     public PipelineCardResponse get(UUID id, AuthenticatedUser viewer) {
         Application application = find(id);
-        boolean restricted = checkViewer(viewer, jobOf(application), "application.not-assigned");
+        boolean restricted = checkApplicationViewer(viewer, application);
         return card(application, restricted);
     }
 
@@ -168,7 +171,7 @@ public class PipelineService {
     @Transactional(readOnly = true)
     public List<StageMoveResponse> history(UUID id, AuthenticatedUser viewer) {
         Application application = find(id);
-        checkViewer(viewer, jobOf(application), "application.not-assigned");
+        checkApplicationViewer(viewer, application);
         List<StageMove> moves = stageMoves.findByApplicationIdOrderByCreatedAtDescIdDesc(id);
         Map<UUID, String> names = userService.namesOf(moves.stream().map(StageMove::getByUserId).filter(Objects::nonNull).distinct().toList());
         return moves.stream().map(m -> mapper.toResponse(m, m.getByUserId() == null ? null : names.get(m.getByUserId()))).toList();
@@ -281,11 +284,13 @@ public class PipelineService {
         String note = trimmedOrNull(request.note());
         Instant now = clock.instant();
         int rejected = 0;
+        List<UUID> closed = new ArrayList<>();
         for (Application application : applications) {
             if (application.getStatus() != ApplicationStatus.ACTIVE) {
                 continue;
             }
             application.reject(reason.id(), note, actor.id(), now);
+            closed.add(application.getId());
             stageMoves.save(new StageMove(application.getId(), StageMoveAction.REJECTED, application.getStage(), null, actor.id(),
                     note == null ? reason.label() : reason.label() + " – " + note, now));
             if (templateId != null) {
@@ -294,6 +299,9 @@ public class PipelineService {
             rejected++;
         }
         repository.flush();
+        if (!closed.isEmpty()) {
+            events.publishEvent(new ApplicationsClosedEvent(closed, actor.id()));
+        }
         return new RejectResponse(rejected);
     }
 
@@ -547,6 +555,27 @@ public class PipelineService {
             throw new ForbiddenException(notAssignedKey);
         }
         return true;
+    }
+
+    /**
+     * An application: staff of the job as {@link #checkViewer}, plus an interviewer of one of its interviews (stage 9),
+     * also when not assigned to the job.
+     */
+    private boolean checkApplicationViewer(AuthenticatedUser viewer, Application application) {
+        if (viewer.hasRole(UserRole.INTERVIEWER.name())) {
+            InterviewerApplicationAccess access = interviewAccess.getIfAvailable();
+            if (access != null && access.applicationIdsOf(viewer.id()).contains(application.getId())) {
+                return true;
+            }
+        }
+        return checkViewer(viewer, jobOf(application), "application.not-assigned");
+    }
+
+    /** An application to interview (stage 9): 404 when there is none. */
+    @Transactional(readOnly = true)
+    public InterviewTarget interviewTarget(UUID applicationId) {
+        Application a = find(applicationId);
+        return new InterviewTarget(a.getId(), a.getJobId(), a.getCandidateId(), a.getStatus(), a.visibleToClient());
     }
 
     private Application find(UUID id) {

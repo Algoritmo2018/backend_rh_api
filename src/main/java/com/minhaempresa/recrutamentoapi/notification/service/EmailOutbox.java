@@ -2,6 +2,7 @@ package com.minhaempresa.recrutamentoapi.notification.service;
 
 import com.minhaempresa.recrutamentoapi.notification.entity.EmailPurpose;
 import com.minhaempresa.recrutamentoapi.notification.entity.OutboundEmail;
+import com.minhaempresa.recrutamentoapi.notification.sender.EmailAttachment;
 import com.minhaempresa.recrutamentoapi.notification.repository.OutboundEmailRepository;
 import java.time.Clock;
 import java.util.Collection;
@@ -36,7 +37,14 @@ public class EmailOutbox {
      */
     @Transactional
     public void enqueue(EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody, UUID referenceId, UUID notifyUserId) {
-        repository.save(new OutboundEmail(purpose, recipient, subject, textBody, htmlBody, clock.instant(), referenceId, notifyUserId));
+        enqueue(purpose, recipient, subject, textBody, htmlBody, referenceId, notifyUserId, null);
+    }
+
+    /** Same, with a text attachment (e.g. the {@code .ics} of an interview; {@code null} = none). */
+    @Transactional
+    public void enqueue(EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody, UUID referenceId, UUID notifyUserId,
+            EmailAttachment attachment) {
+        repository.save(new OutboundEmail(purpose, recipient, subject, textBody, htmlBody, clock.instant(), referenceId, notifyUserId).withAttachment(attachment));
     }
 
     /** Deletes the emails of these records, sent or not (erasure of a candidate). */

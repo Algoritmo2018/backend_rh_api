@@ -288,17 +288,13 @@ class PipelineIntegrationTest {
             String company = jdbc.queryForObject("SELECT name FROM clients WHERE id = ?", String.class, clientId);
             assertThat((String) message.get("body")).isEqualTo("Olá Pedro, avançou na vaga " + job.title() + " (" + company + ").");
 
-            // The stage's own template (interview invitation) needs the interview date, unknown until stage 9 → 422, nothing moves
+            // Stage 9 (D9-1): "Entrevista RH" no longer has an automatic action (the invitation goes when the interview is
+            // scheduled), so moving there with runAutoAction sends nothing and moves
+            int before = count("SELECT count(*) FROM messages WHERE application_id = ?", app.id());
             Map<String, Object> interview = moveBody("hr_interview", version(app.id()));
             interview.put("runAutoAction", true);
-            move(app.id(), recruiter, interview)
-                    .andExpect(status().isUnprocessableContent())
-                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("{{data_entrevista}}")));
-            assertThat(card(app.id(), recruiter).path("stage").asString()).isEqualTo("screening");
-            assertThat(count("SELECT count(*) FROM stage_moves WHERE application_id = ? AND to_stage = 'HR_INTERVIEW'", app.id())).isZero();
-
-            // Without the automatic action it moves
-            move(app.id(), recruiter, moveBody("hr_interview", version(app.id()))).andExpect(status().isOk());
+            move(app.id(), recruiter, interview).andExpect(status().isOk()).andExpect(jsonPath("$.stage").value("hr_interview"));
+            assertThat(count("SELECT count(*) FROM messages WHERE application_id = ?", app.id())).isEqualTo(before);
         }
 
         @Test

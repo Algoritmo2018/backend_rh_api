@@ -70,7 +70,8 @@ public class OutboxWorker {
         Instant now = clock.instant();
         return repository.claimNextDue(now).map(email -> {
             try {
-                sender.send(OutboundNotification.email(email.getPurpose(), email.getRecipient(), email.getSubject(), email.getTextBody(), email.getHtmlBody()));
+                sender.send(OutboundNotification.email(email.getPurpose(), email.getRecipient(), email.getSubject(), email.getTextBody(), email.getHtmlBody(),
+                        email.attachment()));
                 email.markSent(clock.instant());
                 publishStatus(email, true);
             } catch (RuntimeException e) {

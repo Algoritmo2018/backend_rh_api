@@ -15,7 +15,12 @@ public enum NotificationType implements WireEnum {
     /** Client users: candidates were shared with their company (stage 8c). */
     CANDIDATES_SHARED("candidates_shared"),
     /** Client users: FEH OIRAM wrote in a shortlist (stage 8c). */
-    CLIENT_COMMENT("client_comment");
+    CLIENT_COMMENT("client_comment"),
+    /** Interviews (stage 9): a new interview for this user (interviewer, client participant). */
+    INTERVIEW_ASSIGNED("interview_assigned"),
+    /** Interviews: time, place or link changed, or a slot was chosen. */
+    INTERVIEW_UPDATED("interview_updated"),
+    INTERVIEW_CANCELLED("interview_cancelled");
 
     private final String value;
 

@@ -20,6 +20,7 @@ import com.minhaempresa.recrutamentoapi.job.entity.RequirementCategory;
 import com.minhaempresa.recrutamentoapi.job.entity.SalaryRange;
 import com.minhaempresa.recrutamentoapi.job.entity.ScreeningQuestion;
 import com.minhaempresa.recrutamentoapi.job.entity.ScreeningQuestionType;
+import com.minhaempresa.recrutamentoapi.job.event.JobClosedEvent;
 import com.minhaempresa.recrutamentoapi.job.event.JobStaffAssignedEvent;
 import com.minhaempresa.recrutamentoapi.job.event.JobStaffAssignedEvent.Assignee;
 import com.minhaempresa.recrutamentoapi.job.mapper.JobMapper;
@@ -153,6 +154,12 @@ public class JobService {
         return repository.findAllById(Set.copyOf(jobIds)).stream().collect(Collectors.toMap(Job::getId, Job::getTitle));
     }
 
+    /** Ids of the jobs of a client company (agenda filter by client). */
+    @Transactional(readOnly = true)
+    public List<UUID> jobIdsOfClient(UUID clientId) {
+        return repository.findIdsByClientId(clientId);
+    }
+
     /** Ids of the jobs where the user is an interviewer (their candidates are visible to them, D6-1). */
     @Transactional(readOnly = true)
     public List<UUID> jobIdsWithInterviewer(UUID userId) {
@@ -255,7 +262,7 @@ public class JobService {
         boolean locked = hasApplications(job.getId());
         replaceRequirements(job, request.requirements(), locked);
         replaceQuestions(job, request.screeningQuestions(), locked);
-        moveTo(job, request.status(), today);
+        moveTo(job, request.status(), today, actor.id());
         repository.flush();
 
         publishAssignments(job, assigned);
@@ -265,10 +272,10 @@ public class JobService {
     /** Publish, pause or close (job list menu). Staying in the same state does nothing. */
     @Transactional
     @CacheEvict(cacheNames = {CacheNames.PUBLIC_JOBS_FEATURED, CacheNames.PUBLIC_JOBS_AREA_COUNTS}, allEntries = true)
-    public JobResponse changeStatus(UUID id, JobStatusRequest request) {
+    public JobResponse changeStatus(UUID id, JobStatusRequest request, AuthenticatedUser actor) {
         Job job = find(id);
         requireTransition(job.getStatus(), request.status());
-        moveTo(job, request.status(), today());
+        moveTo(job, request.status(), today(), actor.id());
         repository.flush();
         return mapper.toResponse(job);
     }
@@ -288,7 +295,7 @@ public class JobService {
     }
 
     /** Applies an allowed transition; publishing re-checks the client and the deadline. */
-    private void moveTo(Job job, JobStatus target, LocalDate today) {
+    private void moveTo(Job job, JobStatus target, LocalDate today, UUID actorId) {
         if (target == job.getStatus()) {
             return;
         }
@@ -299,6 +306,10 @@ public class JobService {
             requireDeadlineNotPast(job.getDeadline(), today);
         }
         job.changeStatus(target, clock.instant());
+        if (target == JobStatus.CLOSED) {
+            // Stage 9: its interviews still to happen are cancelled (same transaction)
+            events.publishEvent(new JobClosedEvent(job.getId(), actorId));
+        }
     }
 
     private void requireActiveClient(UUID clientId) {

@@ -26,15 +26,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Applications of the candidate page (frontend {@code InternalApplication}), the newest first. Interviewers only
- * get the applications of the jobs where they are assigned (D6-1, adjustment 6).
+ * get the applications of the jobs where they are assigned (D6-1, adjustment 6) or of their interviews (stage 9).
  */
 @Component
 @RequiredArgsConstructor
@@ -48,6 +50,7 @@ class ApplicationProfileProvider implements CandidateApplicationsProvider {
     private final PipelineStageService pipelineStageService;
     private final RejectionReasonService rejectionReasonService;
     private final Messages messages;
+    private final ObjectProvider<InterviewerApplicationAccess> interviewAccess;
 
     @Override
     @Transactional(readOnly = true)
@@ -60,9 +63,11 @@ class ApplicationProfileProvider implements CandidateApplicationsProvider {
         applications.stream().map(Application::getJobId).distinct()
                 .forEach(jobId -> jobService.findApplicable(jobId).ifPresent(job -> jobs.put(jobId, job)));
         boolean interviewer = viewer.hasRole(UserRole.INTERVIEWER.name());
+        InterviewerApplicationAccess access = interviewer ? interviewAccess.getIfAvailable() : null;
+        Set<UUID> byInterview = access == null ? Set.of() : access.applicationIdsOf(viewer.id());
         List<Application> visible = applications.stream()
                 .filter(a -> jobs.containsKey(a.getJobId()))
-                .filter(a -> !interviewer || jobs.get(a.getJobId()).interviewerIds().contains(viewer.id()))
+                .filter(a -> !interviewer || jobs.get(a.getJobId()).interviewerIds().contains(viewer.id()) || byInterview.contains(a.getId()))
                 .toList();
         if (visible.isEmpty()) {
             return List.of();
