@@ -70,6 +70,11 @@ public class FrontendLinks {
         return builder("/cliente/pedir-vaga").toUriString();
     }
 
+    /** Client portal page of a job: read-only job and its shortlist (stage 8c). */
+    public String clientPortalJob(UUID jobId) {
+        return builder("/cliente/vagas/{id}").buildAndExpand(jobId).toUriString();
+    }
+
     /** Pipeline (kanban) of a job in the internal panel (administrators and recruiters). */
     public String job(UUID jobId) {
         return builder("/app/vagas/{id}").buildAndExpand(jobId).toUriString();

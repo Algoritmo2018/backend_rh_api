@@ -14,4 +14,7 @@ public interface ConsentRepository extends JpaRepository<Consent, UUID> {
 
     /** The active general consent of a type (talent pool, marketing), if any. */
     Optional<Consent> findByCandidateIdAndTypeAndJobIdIsNullAndRevokedAtIsNull(UUID candidateId, ConsentType type);
+
+    /** Active job-application consents of a candidate for a job, the newest first. */
+    List<Consent> findByCandidateIdAndTypeAndJobIdAndRevokedAtIsNullOrderByGrantedAtDesc(UUID candidateId, ConsentType type, UUID jobId);
 }

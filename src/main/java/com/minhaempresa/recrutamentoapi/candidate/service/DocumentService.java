@@ -82,6 +82,10 @@ public class DocumentService {
     public DocumentResponse uploadMine(AuthenticatedUser actor, DocumentUploadRequest request, String originalName, byte[] content) {
         UUID candidateId = candidateService.ownCandidateId(actor);
         DocumentType type = request.type();
+        if (type == DocumentType.CLIENT_CV) {
+            // Only a recruiter uploads the CV for the client, for one application (stage 8c)
+            throw fieldError("type", "document.type.not-allowed");
+        }
         if (content == null || content.length == 0) {
             throw fieldError("file", "document.file.required");
         }
@@ -149,6 +153,57 @@ public class DocumentService {
         }
         repository.flush();
         return document.getId();
+    }
+
+    /**
+     * Stores the "CV para o cliente" of an application (stage 8c): PDF only, 5 MB, checked by content, virus scan.
+     * A document of the candidate of type {@code client_cv}; never the profile's current CV.
+     *
+     * @return the id of the new document
+     */
+    @Transactional
+    public UUID storeClientCv(UUID candidateId, String originalName, byte[] content, String field) {
+        DocumentType type = DocumentType.CLIENT_CV;
+        if (content == null || content.length == 0) {
+            throw fieldError(field, "document.file.required");
+        }
+        if (content.length > type.maxBytes()) {
+            long megabytes = type.maxBytes() / (1024 * 1024);
+            throw new BusinessException("document.too-large", List.of(new FieldError(field, "document.too-large", List.of(megabytes))), megabytes);
+        }
+        FileType fileType = FileType.detect(content).filter(type.acceptedFormats()::contains)
+                .orElseThrow(() -> fieldError(field, "document.client-cv.invalid-type"));
+        findCandidate(candidateId);
+        fileScanner.scan(content);
+        StoredFile stored = storage.store("documents", fileType, content);
+        storageCleanup.deleteIfRolledBack(stored.key());
+        CandidateDocument document = repository.save(new CandidateDocument(candidateId, type, safeFileName(originalName, fileType), fileType.mimeType(),
+                stored.sizeBytes(), stored.key(), stored.sha256(), null, null, clock.instant()));
+        repository.flush();
+        return document.getId();
+    }
+
+    /** Deletes a "CV para o cliente" (replaced or removed by the recruiter); the file leaves after the commit. */
+    @Transactional
+    public void deleteClientCv(UUID documentId) {
+        repository.findById(documentId).filter(d -> d.getType() == DocumentType.CLIENT_CV).ifPresent(document -> {
+            repository.delete(document);
+            storageCleanup.deleteAfterCommit(List.of(document.getStorageKey()));
+            repository.flush();
+        });
+    }
+
+    /**
+     * The "CV para o cliente" opened by a client user (stage 8c). The caller (applications module) has already
+     * checked the isolation (the application is shared with this user's company); here only a {@code client_cv}
+     * is ever served (never the original CV nor another document) and the opening is logged.
+     */
+    @Transactional
+    public DocumentFile openClientCv(UUID documentId, boolean inline, UUID viewerId) {
+        CandidateDocument document = repository.findById(documentId).filter(d -> d.getType() == DocumentType.CLIENT_CV)
+                .orElseThrow(DocumentService::notFound);
+        accessRepository.save(new DocumentAccess(document, viewerId, inline ? DocumentAccess.Action.VIEW : DocumentAccess.Action.DOWNLOAD, clock.instant()));
+        return new DocumentFile(storage.load(document.getStorageKey()), document.getMimeType(), document.getFileName(), document.getSizeBytes(), inline);
     }
 
     private static FileType detectCv(byte[] content, String field) {

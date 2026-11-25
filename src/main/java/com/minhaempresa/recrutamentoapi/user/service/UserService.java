@@ -488,6 +488,15 @@ public class UserService {
                 .toList();
     }
 
+    /** Portal users of a client company who can still log in (inactive company or user → none). */
+    @Transactional(readOnly = true)
+    public List<UserContact> activeContactsOfClient(UUID clientId) {
+        return repository.findByClientId(clientId).stream()
+                .filter(u -> u.getRole() == UserRole.CLIENT && credentials(u).active())
+                .map(u -> new UserContact(u.getId(), u.getName(), u.getEmail()))
+                .toList();
+    }
+
     /** Contact of a user who can still log in (for client users: with an active company). */
     @Transactional(readOnly = true)
     public Optional<UserContact> findActiveContact(UUID id) {

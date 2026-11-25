@@ -212,6 +212,7 @@ public class ApplicationService {
         application.setPhone(applicant.phone());
         application.setProvince(applicant.province());
         application.setCvDocumentId(cvId);
+        application.setFromProfile(applicant.loggedIn());
         application.setQuickProfile(toQuickProfile(quick));
         application.getAnswers().addAll(answers.answers());
         if (match != null) {

@@ -1,6 +1,8 @@
 package com.minhaempresa.recrutamentoapi.application.mapper;
 
 import com.minhaempresa.recrutamentoapi.application.dto.response.ApplicationResponse;
+import com.minhaempresa.recrutamentoapi.application.dto.response.ClientCommentResponse;
+import com.minhaempresa.recrutamentoapi.application.entity.ClientComment;
 import com.minhaempresa.recrutamentoapi.application.dto.response.QuickProfileResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.ScreeningAnswerResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.StageMoveResponse;
@@ -29,6 +31,8 @@ public interface ApplicationMapper {
     RequirementMatch toMatchResponse(RequirementMatchEntry match);
 
     QuickProfileResponse toQuickProfileResponse(QuickProfile quickProfile);
+
+    ClientCommentResponse toCommentResponse(ClientComment comment);
 
     @Mapping(target = "id", source = "move.id")
     StageMoveResponse toResponse(StageMove move, String byUserName);

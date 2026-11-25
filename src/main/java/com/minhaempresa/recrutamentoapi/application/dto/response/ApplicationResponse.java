@@ -12,11 +12,12 @@ import java.util.UUID;
 
 /**
  * Frontend {@code Application} (staff views), plus {@code version}, {@code cvDocumentId}/{@code cvUrl} (the CV sent
- * with the application, D8-2) and {@code quickProfile} (sent instead of a CV).
+ * with the application, D8-2), {@code quickProfile} (sent instead of a CV) and {@code clientCvDocumentId}.
  *
  * @param score 0–100; {@code null} = nothing structured to evaluate (anonymous application with a CV only)
  * @param sourceId where the applicant came from ({@code portal}, {@code whatsapp}…)
- * @param clientComments shortlist comments: empty until stage 8c
+ * @param clientComments shortlist comments, the oldest first
+ * @param clientCvDocumentId the "CV para o cliente" (the only file the client may open), or {@code null}
  * @param version send it back when moving (stale → 409)
  */
 public record ApplicationResponse(
@@ -39,7 +40,7 @@ public record ApplicationResponse(
         boolean sharedWithClient,
         Instant sharedAt,
         ClientDecision clientDecision,
-        List<Object> clientComments,
+        List<ClientCommentResponse> clientComments,
         String recruiterSummary,
         Instant appliedAt,
         Instant stageEnteredAt,
@@ -47,4 +48,14 @@ public record ApplicationResponse(
         long version,
         UUID cvDocumentId,
         String cvUrl,
-        QuickProfileResponse quickProfile) {}
+        QuickProfileResponse quickProfile,
+        UUID clientCvDocumentId) {
+
+    /** The same application with its shortlist comments (loaded apart, one query per page). */
+    public static ApplicationResponse withClientComments(ApplicationResponse r, List<ClientCommentResponse> comments) {
+        return new ApplicationResponse(r.id(), r.jobId(), r.candidateId(), r.stage(), r.status(), r.score(), r.matches(), r.eliminated(), r.screeningAnswers(),
+                r.rating(), r.tagIds(), r.sourceId(), r.rejectionReasonId(), r.rejectionNote(), r.rejectedAt(), r.rejectedById(), r.sharedWithClient(),
+                r.sharedAt(), r.clientDecision(), comments, r.recruiterSummary(), r.appliedAt(), r.stageEnteredAt(), r.updatedAt(), r.version(),
+                r.cvDocumentId(), r.cvUrl(), r.quickProfile(), r.clientCvDocumentId());
+    }
+}

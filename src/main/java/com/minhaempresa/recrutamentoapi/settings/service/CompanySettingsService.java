@@ -83,9 +83,16 @@ public class CompanySettingsService {
         }
         String jobText = request.consentJobText() == null ? s.getConsentJobText() : request.consentJobText().trim();
         String poolText = request.consentTalentPoolText() == null ? s.getConsentTalentPoolText() : request.consentTalentPoolText().trim();
-        if (!jobText.equals(s.getConsentJobText()) || !poolText.equals(s.getConsentTalentPoolText())) {
+        boolean jobTextChanged = !jobText.equals(s.getConsentJobText());
+        if (jobTextChanged && request.consentJobIncludesClientSharing() == null) {
+            // The administrator must say whether the new text covers sharing with the client company (stage 8c)
+            throw new BusinessException("settings.company.consent-sharing-required",
+                    List.of(new FieldError("consentJobIncludesClientSharing", "settings.company.consent-sharing-required")));
+        }
+        if (jobTextChanged || !poolText.equals(s.getConsentTalentPoolText())) {
+            boolean sharing = jobTextChanged ? request.consentJobIncludesClientSharing() : includesClientSharing(s.getConsentTextVersion());
             String version = nextVersion(s.getConsentTextVersion(), clock.instant().atZone(ZoneOffset.UTC).getYear());
-            consentVersions.save(new ConsentTextVersion(version, jobText, poolText));
+            consentVersions.save(new ConsentTextVersion(version, jobText, poolText, sharing));
             s.setConsentTextVersion(version);
             s.setConsentJobText(jobText);
             s.setConsentTalentPoolText(poolText);
@@ -177,13 +184,22 @@ public class CompanySettingsService {
         });
     }
 
+    /**
+     * Whether a consent text version covers sharing with the client company (stage 8c); unknown version → false.
+     */
+    @Transactional(readOnly = true)
+    public boolean includesClientSharing(String version) {
+        return version != null && consentVersions.findById(version).map(ConsentTextVersion::isIncludesClientSharing).orElse(false);
+    }
+
     private static String logoUrl(CompanySettings s) {
         return s.getLogoHash() == null ? null : LOGO_PATH + "?v=" + s.getLogoHash();
     }
 
-    private static CompanySettingsResponse toResponse(CompanySettings s) {
+    private CompanySettingsResponse toResponse(CompanySettings s) {
         return new CompanySettingsResponse(s.getName(), s.getLegalName(), s.getNif(), s.getEmail(), s.getPhone(), s.getAddress(), s.getWebsite(),
-                logoUrl(s), s.getDataRetentionMonths(), s.getConsentTextVersion(), s.getConsentJobText(), s.getConsentTalentPoolText(), s.getUpdatedAt());
+                logoUrl(s), s.getDataRetentionMonths(), s.getConsentTextVersion(), s.getConsentJobText(), s.getConsentTalentPoolText(),
+                includesClientSharing(s.getConsentTextVersion()), s.getUpdatedAt());
     }
 
     private static BusinessException invalidLogo(String key) {

@@ -306,6 +306,14 @@ public class CandidateService {
                 candidate.getProvince(), candidate.getCvDocumentId());
     }
 
+    /** The part of a stored profile a client may see (stage 8c, approved field list). */
+    @Transactional(readOnly = true)
+    public SharedProfile sharedProfileOf(UUID candidateId) {
+        CandidateResponse c = mapper.toResponse(find(candidateId));
+        return new SharedProfile(c.headline(), c.summary(), c.experience(), c.education(), c.languages(), c.skills(), c.driverLicenses(),
+                c.availability(), c.totalExperienceYears());
+    }
+
     /** Profile data of the pipeline cards, by id (missing ids are left out). */
     @Transactional(readOnly = true)
     public Map<UUID, CandidateCard> cardsOf(Collection<UUID> candidateIds) {

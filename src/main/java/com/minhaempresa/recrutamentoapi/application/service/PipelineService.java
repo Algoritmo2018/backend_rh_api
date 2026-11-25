@@ -6,6 +6,19 @@ import com.minhaempresa.recrutamentoapi.application.dto.request.ApplicationMoveR
 import com.minhaempresa.recrutamentoapi.application.dto.request.ApplicationRejectRequest;
 import com.minhaempresa.recrutamentoapi.application.dto.request.ApplicationUpdateRequest;
 import com.minhaempresa.recrutamentoapi.application.dto.request.ApplicationVersionRef;
+import com.minhaempresa.recrutamentoapi.application.dto.request.ClientCommentRequest;
+import com.minhaempresa.recrutamentoapi.application.dto.request.ShareWithClientRequest;
+import com.minhaempresa.recrutamentoapi.application.dto.response.ClientCommentResponse;
+import com.minhaempresa.recrutamentoapi.application.dto.response.ShareResponse;
+import com.minhaempresa.recrutamentoapi.application.entity.ClientComment;
+import com.minhaempresa.recrutamentoapi.application.entity.ClientDecision;
+import com.minhaempresa.recrutamentoapi.application.event.CandidatesSharedEvent;
+import com.minhaempresa.recrutamentoapi.application.event.ClientCommentAddedEvent;
+import com.minhaempresa.recrutamentoapi.application.repository.ClientCommentRepository;
+import com.minhaempresa.recrutamentoapi.candidate.service.DocumentService;
+import com.minhaempresa.recrutamentoapi.settings.service.CompanySettingsService;
+import org.springframework.context.ApplicationEventPublisher;
+import com.minhaempresa.recrutamentoapi.application.dto.response.ApplicationResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.AddToJobResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.BulkMoveResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.PipelineCandidateResponse;
@@ -93,6 +106,10 @@ import org.springframework.transaction.annotation.Transactional;
  *       to that user's bell. Sent in the same transaction (outbox): a message that cannot be built (e.g. a variable
  *       without a value) → 422 and nothing changes. One email per candidate, never several recipients
  *       (adjustment 5).
+ *   <li><b>Sharing with the client</b> (stage 8c): per application, only when the consent text version the candidate
+ *       accepted for that job covers it (entering the client interview shares it too, approved, under the same rule);
+ *       the client sees it while it is in progress or hired. FEH OIRAM comments and the "CV para o cliente" (the only
+ *       file the client may open). Notices to the client never carry the candidate's name.
  *   <li><b>Bulk:</b> at most {@code app.applications.bulk.max-items} per request (422); a request with more than
  *       one application/candidate counts as a bulk action: {@code max-actions-per-day} per user in 24 hours,
  *       counted in the database (429 with {@code Retry-After}). Accepted race: two requests at the same instant
@@ -120,6 +137,10 @@ public class PipelineService {
     private final RejectionReasonService rejectionReasonService;
     private final TagService tagService;
     private final UserService userService;
+    private final ClientCommentRepository clientComments;
+    private final CompanySettingsService companySettings;
+    private final DocumentService documentService;
+    private final ApplicationEventPublisher events;
     private final ApplicationProperties properties;
     private final Messages messages;
     private final Clock clock;
@@ -164,8 +185,10 @@ public class PipelineService {
         if (!application.inProcess()) {
             throw new BusinessException("application.restore-first");
         }
-        moveOne(application, request.toStage(), request.note(), Boolean.TRUE.equals(request.runAutoAction()), request.templateId(), actor.id());
+        Map<UUID, Integer> sharedPerJob = new LinkedHashMap<>();
+        moveOne(application, request.toStage(), request.note(), Boolean.TRUE.equals(request.runAutoAction()), request.templateId(), actor.id(), sharedPerJob);
         repository.flush();
+        publishShared(sharedPerJob);
         return card(application, false);
     }
 
@@ -185,22 +208,34 @@ public class PipelineService {
         recordBulkAction(actor.id(), BulkAction.Kind.MOVE, applications.size());
         boolean runAutoAction = Boolean.TRUE.equals(request.runAutoAction());
         int moved = 0;
+        Map<UUID, Integer> sharedPerJob = new LinkedHashMap<>();
         for (Application application : applications) {
-            if (application.inProcess() && moveOne(application, request.toStage(), request.note(), runAutoAction, request.templateId(), actor.id())) {
+            if (application.inProcess() && moveOne(application, request.toStage(), request.note(), runAutoAction, request.templateId(), actor.id(), sharedPerJob)) {
                 moved++;
             }
         }
         repository.flush();
+        publishShared(sharedPerJob);
         return new BulkMoveResponse(moved);
     }
 
-    /** @return whether it moved (an application already in the stage stays as it is) */
-    private boolean moveOne(Application application, PipelineStageKey target, String note, boolean runAutoAction, UUID templateOverride, UUID actorId) {
+    /**
+     * @param sharedPerJob counts applications shared with the client by this move (entering the client interview with
+     *     a consent that covers sharing), per job, for one notice per job
+     * @return whether it moved (an application already in the stage stays as it is)
+     */
+    private boolean moveOne(Application application, PipelineStageKey target, String note, boolean runAutoAction, UUID templateOverride, UUID actorId,
+            Map<UUID, Integer> sharedPerJob) {
         if (application.getStage() == target) {
             return false;
         }
         PipelineStageKey from = application.getStage();
         application.moveTo(target, clock.instant());
+        if (target == PipelineStageKey.CLIENT_INTERVIEW && !application.isSharedWithClient() && consentCoversSharing(application)) {
+            // Frontend rule: entering the client interview shares it, approved; only when the consent allows it
+            application.shareWithClient(ClientDecision.APPROVED, clock.instant());
+            sharedPerJob.merge(application.getJobId(), 1, Integer::sum);
+        }
         stageMoves.save(new StageMove(application.getId(), StageMoveAction.MOVED, from, target, actorId, trimmedOrNull(note), clock.instant()));
         if (runAutoAction) {
             autoMessage(target, templateOverride).ifPresent(action -> messageService.sendFromTemplate(
@@ -342,6 +377,7 @@ public class PipelineService {
             application.setPhone(candidate.phone());
             application.setProvince(candidate.province());
             application.setCvDocumentId(candidate.cvDocumentId());
+            application.setFromProfile(true);
             match.matches().forEach(m -> application.getMatches().add(new RequirementMatchEntry(m.requirementId(), m.met(), m.detail())));
             repository.save(application);
             stageMoves.save(new StageMove(application.getId(), StageMoveAction.APPLIED, null, PipelineStageKey.SCREENING, actor.id(), reason, now));
@@ -349,6 +385,112 @@ public class PipelineService {
         }
         repository.flush();
         return new AddToJobResponse(added, candidateIds.size() - added);
+    }
+
+    // =====================================================================================
+    // Sharing with the client (stage 8c)
+    // =====================================================================================
+
+    /**
+     * Shares applications in progress with the job's client company (shortlist), awaiting its decision. Each one is
+     * checked against the consent text version its candidate accepted for that job: a version that does not cover
+     * sharing with the client (or no job-application consent, e.g. a talent-pool candidate added by a recruiter) →
+     * that application is refused with the reason and the others go on; if none could be shared → 422. Already
+     * shared or not in progress → skipped. Paused and closed jobs allowed (adjustment 4). One notice per job to the
+     * client's portal users, without the candidates' names.
+     */
+    @Transactional
+    public ShareResponse share(ShareWithClientRequest request, AuthenticatedUser actor) {
+        Set<UUID> ids = new LinkedHashSet<>(request.ids());
+        checkBulkSize(ids.size(), "ids");
+        List<Application> applications = load(ids);
+        recordBulkAction(actor.id(), BulkAction.Kind.SHARE, applications.size());
+        String summary = trimmedOrNull(request.summary());
+        Instant now = clock.instant();
+        Map<UUID, Integer> sharedPerJob = new LinkedHashMap<>();
+        List<ShareResponse.Refusal> refused = new ArrayList<>();
+        List<FieldError> errors = new ArrayList<>();
+        int index = 0;
+        for (Application application : applications) {
+            int position = index++;
+            if (application.getStatus() != ApplicationStatus.ACTIVE || application.isSharedWithClient()) {
+                continue;
+            }
+            if (!consentCoversSharing(application)) {
+                refused.add(new ShareResponse.Refusal(application.getId(), messages.get("application.share.no-consent")));
+                errors.add(new FieldError("ids[" + position + "]", "application.share.no-consent"));
+                continue;
+            }
+            application.shareWithClient(ClientDecision.PENDING, now);
+            if (summary != null) {
+                application.setRecruiterSummary(summary);
+            }
+            sharedPerJob.merge(application.getJobId(), 1, Integer::sum);
+        }
+        int shared = sharedPerJob.values().stream().mapToInt(Integer::intValue).sum();
+        if (shared == 0 && !refused.isEmpty()) {
+            throw new BusinessException("application.share.no-consent", errors);
+        }
+        repository.flush();
+        publishShared(sharedPerJob);
+        return new ShareResponse(shared, refused);
+    }
+
+    /**
+     * A FEH OIRAM comment in the shortlist (frontend {@code addClientComment}): only for an application the client
+     * sees (422 otherwise). The client's portal users are told, without the candidate's name.
+     */
+    @Transactional
+    public PipelineCardResponse addClientComment(UUID id, ClientCommentRequest request, AuthenticatedUser actor) {
+        Application application = find(id);
+        if (!application.visibleToClient()) {
+            throw new BusinessException("application.not-shared");
+        }
+        clientComments.save(new ClientComment(application.getId(), actor.id(), false, request.text().trim(), clock.instant()));
+        ApplicableJob job = jobOf(application);
+        events.publishEvent(new ClientCommentAddedEvent(job.id(), job.title(), job.clientId()));
+        return card(application, false);
+    }
+
+    /**
+     * Uploads (or replaces) the "CV para o cliente" of an application: PDF, 5 MB, checked by content, virus scan. The
+     * previous one is deleted (its file after the commit).
+     */
+    @Transactional
+    public PipelineCardResponse uploadClientCv(UUID id, String originalName, byte[] content, AuthenticatedUser actor) {
+        Application application = find(id);
+        UUID previous = application.getClientCvDocumentId();
+        application.setClientCvDocumentId(documentService.storeClientCv(application.getCandidateId(), originalName, content, "file"));
+        if (previous != null) {
+            documentService.deleteClientCv(previous);
+        }
+        repository.flush();
+        return card(application, false);
+    }
+
+    /** Removes the "CV para o cliente": the client then sees only the structured profile. */
+    @Transactional
+    public PipelineCardResponse removeClientCv(UUID id, AuthenticatedUser actor) {
+        Application application = find(id);
+        UUID previous = application.getClientCvDocumentId();
+        if (previous != null) {
+            application.setClientCvDocumentId(null);
+            repository.flush();
+            documentService.deleteClientCv(previous);
+        }
+        return card(application, false);
+    }
+
+    /** The consent this candidate gave for this job covers sharing with the client company (stage 8c). */
+    private boolean consentCoversSharing(Application application) {
+        return consentService.activeJobApplicationVersion(application.getCandidateId(), application.getJobId())
+                .map(companySettings::includesClientSharing)
+                .orElse(false);
+    }
+
+    private void publishShared(Map<UUID, Integer> sharedPerJob) {
+        sharedPerJob.forEach((jobId, count) -> jobService.findApplicable(jobId)
+                .ifPresent(job -> events.publishEvent(new CandidatesSharedEvent(job.id(), job.title(), job.clientId(), count))));
     }
 
     // =====================================================================================
@@ -445,6 +587,8 @@ public class PipelineService {
 
     private List<PipelineCardResponse> cards(List<Application> applications, boolean restricted) {
         Map<UUID, CandidateCard> profiles = candidateService.cardsOf(applications.stream().map(Application::getCandidateId).distinct().toList());
+        Map<UUID, List<ClientCommentResponse>> comments = clientComments.findByApplicationIdInOrderByCreatedAtAscIdAsc(applications.stream().map(Application::getId).toList())
+                .stream().collect(Collectors.groupingBy(ClientComment::getApplicationId, Collectors.mapping(mapper::toCommentResponse, Collectors.toList())));
         List<PipelineCardResponse> cards = new ArrayList<>(applications.size());
         for (Application application : applications) {
             CandidateCard profile = profiles.get(application.getCandidateId());
@@ -458,7 +602,7 @@ public class PipelineService {
                     profile == null ? 0 : profile.totalExperienceYears(),
                     restricted ? null : Texts.blankToNull(application.getEmail()),
                     restricted ? null : Texts.blankToNull(application.getPhone()));
-            cards.add(new PipelineCardResponse(mapper.toResponse(application), candidate));
+            cards.add(new PipelineCardResponse(ApplicationResponse.withClientComments(mapper.toResponse(application), comments.getOrDefault(application.getId(), List.of())), candidate));
         }
         return cards;
     }

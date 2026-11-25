@@ -4,6 +4,7 @@ import com.minhaempresa.recrutamentoapi.application.entity.Application;
 import com.minhaempresa.recrutamentoapi.application.entity.ApplicationStatus;
 import com.minhaempresa.recrutamentoapi.application.entity.StageMove;
 import com.minhaempresa.recrutamentoapi.application.entity.StageMoveAction;
+import com.minhaempresa.recrutamentoapi.application.repository.ClientCommentRepository;
 import com.minhaempresa.recrutamentoapi.application.repository.ApplicationRepository;
 import com.minhaempresa.recrutamentoapi.application.repository.StageMoveRepository;
 import com.minhaempresa.recrutamentoapi.candidate.service.CandidateErasureContributor;
@@ -19,7 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Erasure of a candidate (D8-8): the applications stay (job statistics, "Candidato removido") without any
  * personal data: sent name/email/phone/province, CV link, quick profile, answers, requirement details, notes and
- * the reasons of the history are removed. Applications in progress end as withdrawn.
+ * the reasons of the history and the shortlist comments are removed (the "CV para o cliente" goes with the
+ * candidate's documents). Applications in progress end as withdrawn, so the client no longer sees them.
  */
 @Component
 @RequiredArgsConstructor
@@ -27,6 +29,7 @@ class ApplicationErasureContributor implements CandidateErasureContributor {
 
     private final ApplicationRepository repository;
     private final StageMoveRepository stageMoves;
+    private final ClientCommentRepository clientComments;
     private final Messages messages;
     private final Clock clock;
 
@@ -47,6 +50,8 @@ class ApplicationErasureContributor implements CandidateErasureContributor {
             }
         }
         repository.flush();
-        stageMoves.clearReasons(applications.stream().map(Application::getId).toList());
+        List<UUID> ids = applications.stream().map(Application::getId).toList();
+        stageMoves.clearReasons(ids);
+        clientComments.deleteByApplicationIds(ids);
     }
 }

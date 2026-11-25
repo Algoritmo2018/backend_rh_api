@@ -11,6 +11,7 @@ import com.minhaempresa.recrutamentoapi.shared.exception.BusinessException;
 import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -79,6 +80,17 @@ public class ConsentService {
     @Transactional(readOnly = true)
     public boolean hasActive(UUID candidateId, ConsentType type) {
         return repository.findByCandidateIdAndTypeAndJobIdIsNullAndRevokedAtIsNull(candidateId, type).isPresent();
+    }
+
+    /**
+     * Text version of the active job-application consent the candidate gave for this job (stage 8c: whether it
+     * covers sharing with the client). Empty when there is none (e.g. a talent-pool candidate added by a recruiter).
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> activeJobApplicationVersion(UUID candidateId, UUID jobId) {
+        return repository.findByCandidateIdAndTypeAndJobIdAndRevokedAtIsNullOrderByGrantedAtDesc(candidateId, ConsentType.JOB_APPLICATION, jobId).stream()
+                .findFirst()
+                .map(Consent::getTextVersion);
     }
 
     private List<ConsentResponse> list(UUID candidateId) {

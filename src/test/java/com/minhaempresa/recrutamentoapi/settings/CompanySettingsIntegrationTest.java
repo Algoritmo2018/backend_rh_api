@@ -114,12 +114,21 @@ class CompanySettingsIntegrationTest {
         JsonNode before = company();
         String newText = "Autorizo o tratamento dos meus dados para esta vaga, nos termos da Lei n.º 22/11 (versão de teste " + UUID.randomUUID() + ").";
 
-        JsonNode after = JSON.readTree(api.sendJson("PATCH", "/api/v1/settings/company", users.accessToken(admin), Map.of("consentJobText", newText))
+        // A new job-application text must say whether it covers sharing with the client company (stage 8c)
+        api.sendJson("PATCH", "/api/v1/settings/company", users.accessToken(admin), Map.of("consentJobText", newText))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.errors[0].field").value("consentJobIncludesClientSharing"));
+        assertThat(company().path("consentTextVersion").asString()).isEqualTo(before.path("consentTextVersion").asString());
+
+        JsonNode after = JSON.readTree(api.sendJson("PATCH", "/api/v1/settings/company", users.accessToken(admin),
+                        Map.of("consentJobText", newText, "consentJobIncludesClientSharing", true))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
 
         String version = after.path("consentTextVersion").asString();
         assertThat(version).isNotEqualTo(before.path("consentTextVersion").asString()).matches("\\d{4}\\.\\d+");
-        var saved = jdbc.queryForMap("SELECT job_text, talent_pool_text, created_by FROM consent_text_versions WHERE version = ?", version);
+        assertThat(after.path("consentJobIncludesClientSharing").asBoolean()).isTrue();
+        var saved = jdbc.queryForMap("SELECT job_text, talent_pool_text, created_by, includes_client_sharing FROM consent_text_versions WHERE version = ?", version);
+        assertThat(saved.get("includes_client_sharing")).isEqualTo(true);
         assertThat(saved.get("job_text")).isEqualTo(newText);
         assertThat(saved.get("talent_pool_text")).isEqualTo(before.path("consentTalentPoolText").asString());
         assertThat(saved.get("created_by")).isEqualTo(admin.id());

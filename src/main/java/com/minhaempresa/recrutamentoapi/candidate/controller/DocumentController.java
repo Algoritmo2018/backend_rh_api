@@ -5,15 +5,11 @@ import com.minhaempresa.recrutamentoapi.candidate.dto.response.DocumentFile;
 import com.minhaempresa.recrutamentoapi.candidate.dto.response.DocumentResponse;
 import com.minhaempresa.recrutamentoapi.candidate.service.DocumentService;
 import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
+import com.minhaempresa.recrutamentoapi.shared.web.FileResponses;
 import jakarta.validation.Valid;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
-import org.springframework.http.CacheControl;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,16 +47,6 @@ public class DocumentController {
     @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER', 'INTERVIEWER', 'CANDIDATE')")
     public ResponseEntity<Resource> file(@PathVariable UUID id, @RequestParam(defaultValue = "false") boolean inline, AuthenticatedUser viewer) {
         DocumentFile file = documentService.open(id, inline, viewer);
-        ContentDisposition disposition = ContentDisposition.builder(file.inline() ? "inline" : "attachment")
-                .filename(file.fileName(), StandardCharsets.UTF_8)
-                .build();
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(file.contentType()))
-                .contentLength(file.sizeBytes())
-                .cacheControl(CacheControl.noStore().cachePrivate())
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .header("X-Content-Type-Options", "nosniff")
-                .header("Content-Security-Policy", "sandbox; default-src 'none'")
-                .body(file.content());
+        return FileResponses.of(file.content(), file.contentType(), file.fileName(), file.sizeBytes(), file.inline());
     }
 }

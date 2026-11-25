@@ -11,7 +11,11 @@ public enum NotificationType implements WireEnum {
     CONTACT_REQUEST_RECEIVED("contact_request_received"),
     JOB_ASSIGNED("job_assigned"),
     EMAIL_FAILED("email_failed"),
-    APPLICATION_RECEIVED("application_received");
+    APPLICATION_RECEIVED("application_received"),
+    /** Client users: candidates were shared with their company (stage 8c). */
+    CANDIDATES_SHARED("candidates_shared"),
+    /** Client users: FEH OIRAM wrote in a shortlist (stage 8c). */
+    CLIENT_COMMENT("client_comment");
 
     private final String value;
 

@@ -123,6 +123,17 @@ public class Application extends UserAuditableEntity {
     @Column(name = "recruiter_summary", columnDefinition = "text")
     private String recruiterSummary;
 
+    /** "CV para o cliente" (type {@code client_cv}): the only file the client may open (stage 8c). */
+    @Column(name = "client_cv_document_id")
+    private UUID clientCvDocumentId;
+
+    /**
+     * Made with the candidate's stored profile (logged-in candidate, added from the talent pool): only then does
+     * the client see the stored profile; an anonymous application shows only what it sent (stage 8c).
+     */
+    @Column(name = "from_profile", nullable = false, updatable = false)
+    private boolean fromProfile;
+
     @Column(name = "applied_at", nullable = false, updatable = false)
     private Instant appliedAt;
 
@@ -172,17 +183,24 @@ public class Application extends UserAuditableEntity {
 
     /**
      * Moves to another stage (frontend {@code moveApplication}): the final stage makes it hired (D8-6), any other
-     * stage in progress; entering the client interview marks it shared with the client and approved.
+     * stage in progress. Sharing on entering the client interview is decided by the service (consent check).
      */
     public void moveTo(PipelineStageKey target, Instant now) {
         stage = target;
         stageEnteredAt = now;
         status = target == PipelineStageKey.HIRED ? ApplicationStatus.HIRED : ApplicationStatus.ACTIVE;
-        if (target == PipelineStageKey.CLIENT_INTERVIEW && !sharedWithClient) {
-            sharedWithClient = true;
-            sharedAt = now;
-            clientDecision = ClientDecision.APPROVED;
-        }
+    }
+
+    /** Shared with the client company (shortlist), awaiting its decision or already approved. */
+    public void shareWithClient(ClientDecision decision, Instant now) {
+        sharedWithClient = true;
+        sharedAt = now;
+        clientDecision = decision;
+    }
+
+    /** The client may see it: shared and still in the process (rejected or withdrawn ones disappear, stage 8c). */
+    public boolean visibleToClient() {
+        return sharedWithClient && inProcess();
     }
 
     public void reject(UUID reasonId, String note, UUID byUserId, Instant now) {
@@ -215,6 +233,7 @@ public class Application extends UserAuditableEntity {
         phone = "";
         province = null;
         cvDocumentId = null;
+        clientCvDocumentId = null;
         quickProfile = null;
         rejectionNote = null;
         recruiterSummary = null;

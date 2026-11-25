@@ -25,7 +25,8 @@ public class BulkAction extends BaseEntity {
     public enum Kind {
         MOVE,
         REJECT,
-        ADD_TO_JOB
+        ADD_TO_JOB,
+        SHARE
     }
 
     @Column(name = "user_id", nullable = false, updatable = false)

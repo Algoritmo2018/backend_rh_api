@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * Frontend {@code InternalApplication} (applications of the candidate page).
  *
- * @param commentAuthors authors of the shortlist comments: empty until stage 8c
+ * @param commentAuthors name of each author of the shortlist comments and whether they belong to the client
  */
 public record InternalApplicationResponse(
         @JsonUnwrapped ApplicationResponse application,
@@ -15,4 +15,4 @@ public record InternalApplicationResponse(
         String stageName,
         String sourceName,
         String rejectionReasonLabel,
-        Map<UUID, Object> commentAuthors) {}
+        Map<UUID, CommentAuthorResponse> commentAuthors) {}

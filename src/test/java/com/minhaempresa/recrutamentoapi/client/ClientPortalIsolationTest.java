@@ -2,11 +2,14 @@ package com.minhaempresa.recrutamentoapi.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.minhaempresa.recrutamentoapi.IntegrationTest;
 import com.minhaempresa.recrutamentoapi.support.AuthApi;
+import com.minhaempresa.recrutamentoapi.support.JobBodies;
+import com.minhaempresa.recrutamentoapi.support.SampleFiles;
 import com.minhaempresa.recrutamentoapi.support.TestUsers;
 import com.minhaempresa.recrutamentoapi.support.TestUsers.TestUser;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
@@ -19,7 +22,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import tools.jackson.databind.JsonNode;
@@ -42,7 +47,10 @@ class ClientPortalIsolationTest {
             "GET " + BASE + "/company",
             "GET " + BASE + "/job-requests",
             "GET " + BASE + "/job-requests/{id}",
-            "POST " + BASE + "/job-requests");
+            "POST " + BASE + "/job-requests",
+            "GET " + BASE + "/jobs/{jobId}/shortlist",
+            "GET " + BASE + "/applications/{id}",
+            "GET " + BASE + "/applications/{id}/client-cv");
 
     @Autowired
     MockMvc mvc;
@@ -173,5 +181,87 @@ class ClientPortalIsolationTest {
     void anonymousCallsAre401() throws Exception {
         mvc.perform(get(BASE + "/job-requests")).andExpect(status().isUnauthorized());
         mvc.perform(get(BASE + "/company")).andExpect(status().isUnauthorized());
+    }
+
+    // =====================================================================================
+    // Shortlist (stage 8c)
+    // =====================================================================================
+
+    /** A job of client A with one application shared with A (and its "CV para o cliente"). */
+    record SharedOfA(String jobId, String applicationId) {}
+
+    SharedOfA sharedApplicationOfA() throws Exception {
+        TestUser recruiter = users.create(UserRole.RECRUITER);
+        String recruiterToken = users.accessToken(recruiter);
+        Map<String, Object> jobBody = JobBodies.draft(clientA, recruiter.id(), users.create(UserRole.INTERVIEWER).id());
+        jobBody.put("status", "open");
+        JsonNode job = JSON.readTree(api.sendJson("POST", "/api/v1/jobs", recruiterToken, jobBody).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString());
+        String jobId = job.path("id").asString();
+        String email = TestUsers.uniqueEmail();
+        Map<String, Object> application = new java.util.HashMap<>();
+        application.put("jobId", jobId);
+        application.put("fullName", "Isabel Teste Isolamento");
+        application.put("email", email);
+        application.put("phone", TestUsers.uniqueLocalPhone());
+        application.put("province", "Luanda");
+        application.put("screeningAnswers", List.of(Map.of("questionId", job.path("screeningQuestions").get(0).path("id").asString(), "answer", "sim")));
+        application.put("consentJob", true);
+        application.put("consentTalentPool", false);
+        mvc.perform(multipart("/api/v1/public/applications")
+                        .file(new MockMultipartFile("application", "", MediaType.APPLICATION_JSON_VALUE, JSON.writeValueAsBytes(application)))
+                        .file(new MockMultipartFile("cv", "cv.pdf", "application/pdf", SampleFiles.pdf()))
+                        .with(TestUsers.randomIp()))
+                .andExpect(status().isAccepted());
+        String applicationId = jdbc.queryForObject("SELECT id FROM applications WHERE job_id = ?::uuid AND email = ?", UUID.class, jobId, email).toString();
+        api.sendJson("POST", "/api/v1/applications/share-with-client", recruiterToken, Map.of("ids", List.of(applicationId))).andExpect(status().isOk());
+        mvc.perform(multipart("/api/v1/applications/" + applicationId + "/client-cv")
+                        .file(new MockMultipartFile("file", "cv-cliente.pdf", "application/pdf", SampleFiles.pdf()))
+                        .with(users.bearer(recruiter)))
+                .andExpect(status().isOk());
+        return new SharedOfA(jobId, applicationId);
+    }
+
+    @Test
+    void anotherCompanyShortlistApplicationAndCvAreNotFoundLikeMissingOnes() throws Exception {
+        SharedOfA shared = sharedApplicationOfA();
+
+        // The owner sees them
+        mvc.perform(get(BASE + "/jobs/" + shared.jobId() + "/shortlist").with(users.bearer(userA)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(shared.applicationId()));
+        mvc.perform(get(BASE + "/applications/" + shared.applicationId()).with(users.bearer(userA))).andExpect(status().isOk());
+        mvc.perform(get(BASE + "/applications/" + shared.applicationId() + "/client-cv").with(users.bearer(userA))).andExpect(status().isOk());
+
+        // Company B: the same 404 body as ids that do not exist
+        assertSameNotFound(BASE + "/jobs/" + shared.jobId() + "/shortlist", BASE + "/jobs/" + UUID.randomUUID() + "/shortlist", "Vaga não encontrada.");
+        assertSameNotFound(BASE + "/applications/" + shared.applicationId(), BASE + "/applications/" + UUID.randomUUID(), "Candidatura não encontrada.");
+        assertSameNotFound(BASE + "/applications/" + shared.applicationId() + "/client-cv", BASE + "/applications/" + UUID.randomUUID() + "/client-cv",
+                "Candidatura não encontrada.");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_access_log WHERE user_id = ?", Integer.class, userB.id())).isZero();
+
+        // Not shared → not found for the owner too
+        jdbc.update("UPDATE applications SET shared_with_client = FALSE WHERE id = ?::uuid", shared.applicationId());
+        mvc.perform(get(BASE + "/applications/" + shared.applicationId()).with(users.bearer(userA))).andExpect(status().isNotFound());
+        mvc.perform(get(BASE + "/jobs/" + shared.jobId() + "/shortlist").with(users.bearer(userA)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void anInactiveCompanyCannotReadTheShortlist() throws Exception {
+        SharedOfA shared = sharedApplicationOfA();
+        jdbc.update("UPDATE clients SET status = 'INACTIVE' WHERE id = ?", clientA);
+        for (String path : List.of(BASE + "/jobs/" + shared.jobId() + "/shortlist", BASE + "/applications/" + shared.applicationId(),
+                BASE + "/applications/" + shared.applicationId() + "/client-cv")) {
+            mvc.perform(get(path).with(users.bearer(userA))).andExpect(status().isForbidden());
+        }
+    }
+
+    private void assertSameNotFound(String otherPath, String missingPath, String message) throws Exception {
+        JsonNode other = JSON.readTree(mvc.perform(get(otherPath).with(users.bearer(userB))).andExpect(status().isNotFound())
+                .andReturn().getResponse().getContentAsString());
+        JsonNode missing = JSON.readTree(mvc.perform(get(missingPath).with(users.bearer(userB))).andExpect(status().isNotFound())
+                .andReturn().getResponse().getContentAsString());
+        assertThat(other.path("error").asString()).isEqualTo(missing.path("error").asString()).isEqualTo("NotFoundError");
+        assertThat(other.path("message").asString()).isEqualTo(missing.path("message").asString()).isEqualTo(message);
     }
 }

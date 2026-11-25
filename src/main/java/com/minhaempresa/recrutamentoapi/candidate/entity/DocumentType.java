@@ -20,11 +20,14 @@ public enum DocumentType implements WireEnum {
     MEDICAL_CERTIFICATE("medical_certificate", Limits.DOCUMENT_BYTES, null),
     CERTIFICATE("certificate", Limits.DOCUMENT_BYTES, null),
     PHOTO("photo", Limits.PHOTO_BYTES, null),
-    OTHER("other", Limits.DOCUMENT_BYTES, null);
+    OTHER("other", Limits.DOCUMENT_BYTES, null),
+    /** "CV para o cliente" (stage 8c): uploaded by a recruiter for one application, the only file a client may open. */
+    CLIENT_CV("client_cv", Limits.CV_BYTES, null);
 
-    /** PDF, Word (DOCX without macros) or an image; a photo is only PNG or JPEG. */
+    /** PDF, Word (DOCX without macros) or an image; a photo is only PNG or JPEG; the CV for the client only PDF. */
     private static final Set<FileType> DOCUMENT_FORMATS = Set.of(FileType.PDF, FileType.DOCX, FileType.PNG, FileType.JPEG);
     private static final Set<FileType> PHOTO_FORMATS = Set.of(FileType.PNG, FileType.JPEG);
+    private static final Set<FileType> CLIENT_CV_FORMATS = Set.of(FileType.PDF);
 
     private final String value;
     private final long maxBytes;
@@ -47,7 +50,7 @@ public enum DocumentType implements WireEnum {
     }
 
     public Set<FileType> acceptedFormats() {
-        return this == PHOTO ? PHOTO_FORMATS : DOCUMENT_FORMATS;
+        return this == PHOTO ? PHOTO_FORMATS : this == CLIENT_CV ? CLIENT_CV_FORMATS : DOCUMENT_FORMATS;
     }
 
     /** BI, NIF and INSS need their number, in this format (upper case, no spaces). */

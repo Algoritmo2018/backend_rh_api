@@ -1,8 +1,12 @@
 package com.minhaempresa.recrutamentoapi.application.service;
 
+import com.minhaempresa.recrutamentoapi.application.dto.response.CommentAuthorResponse;
+import com.minhaempresa.recrutamentoapi.application.dto.response.ApplicationResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.InternalApplicationJobResponse;
 import com.minhaempresa.recrutamentoapi.application.dto.response.InternalApplicationResponse;
 import com.minhaempresa.recrutamentoapi.application.entity.Application;
+import com.minhaempresa.recrutamentoapi.application.entity.ClientComment;
+import com.minhaempresa.recrutamentoapi.application.repository.ClientCommentRepository;
 import com.minhaempresa.recrutamentoapi.application.mapper.ApplicationMapper;
 import com.minhaempresa.recrutamentoapi.application.repository.ApplicationRepository;
 import com.minhaempresa.recrutamentoapi.candidate.service.CandidateApplicationsProvider;
@@ -18,8 +22,10 @@ import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
 import com.minhaempresa.recrutamentoapi.user.service.UserService;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 class ApplicationProfileProvider implements CandidateApplicationsProvider {
 
     private final ApplicationRepository repository;
+    private final ClientCommentRepository clientComments;
     private final ApplicationMapper mapper;
     private final JobService jobService;
     private final UserService userService;
@@ -65,18 +72,26 @@ class ApplicationProfileProvider implements CandidateApplicationsProvider {
                 .collect(Collectors.toMap(PipelineStageResponse::key, PipelineStageResponse::name));
         Map<UUID, String> reasonLabels = rejectionReasonService.list(true).stream()
                 .collect(Collectors.toMap(RejectionReasonResponse::id, RejectionReasonResponse::label));
+        Map<UUID, List<ClientComment>> comments = clientComments.findByApplicationIdInOrderByCreatedAtAscIdAsc(visible.stream().map(Application::getId).toList())
+                .stream().collect(Collectors.groupingBy(ClientComment::getApplicationId));
+        Map<UUID, String> authorNames = userService.namesOf(comments.values().stream().flatMap(List::stream)
+                .map(ClientComment::getAuthorId).filter(Objects::nonNull).distinct().toList());
         return visible.stream().map(application -> {
             ApplicableJob job = jobs.get(application.getJobId());
             InternalApplicationJobResponse jobResponse = new InternalApplicationJobResponse(job.id(), job.title(), job.status(), job.confidential(),
                     job.requirements(), job.questions(), null, job.clientId(), job.recruiterId(), job.interviewerIds(),
                     job.clientName(), recruiterNames.get(job.recruiterId()));
+            List<ClientComment> own = comments.getOrDefault(application.getId(), List.of());
+            Map<UUID, CommentAuthorResponse> authors = new LinkedHashMap<>();
+            own.stream().filter(c -> c.getAuthorId() != null)
+                    .forEach(c -> authors.putIfAbsent(c.getAuthorId(), new CommentAuthorResponse(authorNames.getOrDefault(c.getAuthorId(), "—"), c.isFromClient())));
             return new InternalApplicationResponse(
-                    mapper.toResponse(application),
+                    ApplicationResponse.withClientComments(mapper.toResponse(application), own.stream().map(mapper::toCommentResponse).toList()),
                     jobResponse,
                     stageNames.getOrDefault(application.getStage(), application.getStage().getValue()),
                     messages.get("source." + application.getSource().getValue()),
                     application.getRejectionReasonId() == null ? null : reasonLabels.get(application.getRejectionReasonId()),
-                    Map.of());
+                    authors);
         }).toList();
     }
 }
