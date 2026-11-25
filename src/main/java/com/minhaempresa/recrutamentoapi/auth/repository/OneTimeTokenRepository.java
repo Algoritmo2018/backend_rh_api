@@ -24,4 +24,13 @@ public interface OneTimeTokenRepository extends JpaRepository<OneTimeToken, UUID
     @Modifying(flushAutomatically = true)
     @Query("update OneTimeToken t set t.usedAt = :now where t.userId = :userId and t.type = :type and t.usedAt is null")
     int invalidatePending(UUID userId, OneTimeTokenType type, Instant now);
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from OneTimeToken t where t.userId = :userId and t.type = :type")
+    int deleteByUserAndType(UUID userId, OneTimeTokenType type);
+
+    /** Daily cleanup: expired tokens are useless (a used token always expires too). */
+    @Modifying
+    @Query("delete from OneTimeToken t where t.expiresAt < :before")
+    int deleteExpiredBefore(Instant before);
 }

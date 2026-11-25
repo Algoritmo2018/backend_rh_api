@@ -1,6 +1,7 @@
 package com.minhaempresa.recrutamentoapi.auth.controller;
 
 import com.minhaempresa.recrutamentoapi.auth.dto.request.AcceptInvitationRequest;
+import com.minhaempresa.recrutamentoapi.auth.dto.request.ConfirmEmailChangeRequest;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.ForgotPasswordRequest;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.LoginRequest;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.OtpRequest;
@@ -114,6 +115,16 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
         authService.verifyEmail(request);
+    }
+
+    /**
+     * Public (the link may be opened logged out). When the browser sends the refresh cookie of the same
+     * account ({@code credentials: 'include'}), that session is kept; every other one ends.
+     */
+    @PostMapping("/email/change/confirm")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void confirmEmailChange(@Valid @RequestBody ConfirmEmailChangeRequest request, HttpServletRequest http) {
+        authService.confirmEmailChange(request, cookies.read(http));
     }
 
     @PostMapping("/email/verify/resend")

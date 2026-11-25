@@ -18,9 +18,9 @@ class RateLimiterTest {
         AuthProperties.Limit any = new AuthProperties.Limit(10, Duration.ofMinutes(1));
         AuthProperties properties = new AuthProperties(
                 "x".repeat(32), false, Set.of(), Duration.ofMinutes(5), 5, Duration.ofSeconds(60), 5, Duration.ofMinutes(5), 5,
-                Duration.ofHours(1), Duration.ofDays(7), Duration.ofHours(48), 5, Duration.ofMinutes(15),
+                Duration.ofHours(1), Duration.ofDays(7), Duration.ofHours(48), Duration.ofHours(24), 5, Duration.ofMinutes(15),
                 new AuthProperties.RefreshCookie("refresh_token", "/api/v1/auth", true, "Strict"),
-                new AuthProperties.RateLimits(maxEntries, any, any, any, any, any, any, any, any));
+                new AuthProperties.RateLimits(maxEntries, any, any, any, any, any, any, any, any, any));
         return new RateLimiter(properties);
     }
 

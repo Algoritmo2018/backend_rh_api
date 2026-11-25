@@ -40,6 +40,16 @@ public class FrontendLinks {
         return withToken("/confirmar-email", token);
     }
 
+    /** Pending frontend route (integration stage): confirms a candidate's new email. */
+    public String emailChange(String token) {
+        return withToken("/confirmar-novo-email", token);
+    }
+
+    /** Public contact page. */
+    public String contact() {
+        return builder("/contacto").toUriString();
+    }
+
     /** Client list of the internal panel. */
     public String clients() {
         return builder("/app/clientes").toUriString();

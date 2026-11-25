@@ -70,6 +70,12 @@ public class MailpitClient {
         return awaitEmailTo(address, 1);
     }
 
+    /** Waits until at least {@code count} emails reached the address and returns them all, newest first. */
+    public List<Email> awaitEmailsTo(String address, int count) {
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(200)).until(() -> countTo(address) >= count);
+        return idsTo(address).stream().map(this::read).toList();
+    }
+
     /** Raw headers of a captured email (name → values), as received by the SMTP server. */
     public Map<String, List<String>> headers(String id) {
         JsonNode node = json.readTree(http.get().uri("/api/v1/message/{id}/headers", id).retrieve().body(String.class));

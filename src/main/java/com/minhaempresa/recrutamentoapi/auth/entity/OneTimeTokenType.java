@@ -15,5 +15,7 @@ public enum OneTimeTokenType {
     /** Challenge token + 6-digit SMS code for the second step of a password login. */
     TWO_FACTOR_LOGIN,
     /** 6-digit SMS code sent to a new phone number; the hash binds the code to that number. */
-    PHONE_CHANGE
+    PHONE_CHANGE,
+    /** Link sent to the new address of a candidate's email change; the token row keeps that address. */
+    EMAIL_CHANGE
 }

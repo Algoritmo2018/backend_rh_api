@@ -102,6 +102,15 @@ public class RefreshTokenService {
         }
     }
 
+    /**
+     * The session (family) of a refresh token, if the token belongs to {@code userId}. Used to keep the
+     * caller's own session when the others are ended; a revoked family stays revoked anyway.
+     */
+    @Transactional(readOnly = true)
+    public Optional<UUID> sessionOf(String rawToken, UUID userId) {
+        return find(rawToken).filter(token -> token.getUserId().equals(userId)).map(RefreshToken::getFamilyId);
+    }
+
     private Optional<RefreshToken> find(String rawToken) {
         return rawToken == null || rawToken.isBlank() ? Optional.empty() : repository.findByTokenHash(hasher.sha256(rawToken));
     }

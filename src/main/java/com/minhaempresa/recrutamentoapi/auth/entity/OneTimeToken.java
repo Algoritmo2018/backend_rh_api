@@ -38,6 +38,10 @@ public class OneTimeToken extends BaseEntity {
     @Column(name = "used_at")
     private Instant usedAt;
 
+    /** New address of an {@link OneTimeTokenType#EMAIL_CHANGE} token (lower case); null for the other types. */
+    @Column(name = "target_email", length = 160, updatable = false)
+    private String targetEmail;
+
     @Column(name = "attempts", nullable = false)
     private int attempts;
 
@@ -51,6 +55,13 @@ public class OneTimeToken extends BaseEntity {
         this.codeHash = codeHash;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
+    }
+
+    /** Email-change link: bound to the user and to the new address. */
+    public static OneTimeToken emailChange(UUID userId, String tokenHash, String targetEmail, Instant createdAt, Instant expiresAt) {
+        OneTimeToken token = new OneTimeToken(userId, OneTimeTokenType.EMAIL_CHANGE, tokenHash, null, createdAt, expiresAt);
+        token.targetEmail = targetEmail;
+        return token;
     }
 
     public boolean isUsable(Instant now) {

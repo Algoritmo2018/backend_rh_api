@@ -1,6 +1,7 @@
 package com.minhaempresa.recrutamentoapi.user.service;
 
 import com.minhaempresa.recrutamentoapi.auth.dto.response.CodeSentResponse;
+import com.minhaempresa.recrutamentoapi.auth.entity.OneTimeTokenType;
 import com.minhaempresa.recrutamentoapi.auth.event.SmsCodeRequestedEvent;
 import com.minhaempresa.recrutamentoapi.auth.service.AuthProperties;
 import com.minhaempresa.recrutamentoapi.auth.service.OneTimeTokenService;
@@ -13,10 +14,12 @@ import com.minhaempresa.recrutamentoapi.shared.domain.PhoneNumbers;
 import com.minhaempresa.recrutamentoapi.shared.exception.ApiException.FieldError;
 import com.minhaempresa.recrutamentoapi.shared.exception.BusinessException;
 import com.minhaempresa.recrutamentoapi.shared.exception.ConflictException;
+import com.minhaempresa.recrutamentoapi.shared.exception.ForbiddenException;
 import com.minhaempresa.recrutamentoapi.shared.exception.NotFoundException;
 import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import com.minhaempresa.recrutamentoapi.user.dto.request.ChangePasswordRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.ChangePhoneRequest;
+import com.minhaempresa.recrutamentoapi.user.dto.request.EmailChangeRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.PhoneCodeRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.TwoFactorRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.UpdateMyProfileRequest;
@@ -30,6 +33,9 @@ import com.minhaempresa.recrutamentoapi.user.entity.User;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
 import com.minhaempresa.recrutamentoapi.user.event.CandidateEmailVerifiedEvent;
 import com.minhaempresa.recrutamentoapi.user.event.CandidateUserRegisteredEvent;
+import com.minhaempresa.recrutamentoapi.user.event.EmailAddressInUseEvent;
+import com.minhaempresa.recrutamentoapi.user.event.EmailChangeNoticeEvent;
+import com.minhaempresa.recrutamentoapi.user.event.EmailChangeRequestedEvent;
 import com.minhaempresa.recrutamentoapi.user.event.SecurityAlertEvent;
 import com.minhaempresa.recrutamentoapi.user.event.UserInvitedEvent;
 import com.minhaempresa.recrutamentoapi.user.mapper.UserMapper;
@@ -49,7 +55,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -59,7 +67,8 @@ import org.springframework.transaction.annotation.Transactional;
  * User accounts: administration (staff and client users), own profile, and the account operations the
  * auth module needs (credentials, login counters, passwords).
  *
- * <p>Rules from the frontend ({@code DECISOES.md} #90): the email cannot change, an administrator cannot
+ * <p>Rules from the frontend ({@code DECISOES.md} #90): a staff or client email cannot change (candidates
+ * change theirs only through a confirmed link, stage 7b), an administrator cannot
  * change their own role or deactivate themselves, a client user needs a company, candidates are not
  * managed here and users are never deleted (they are deactivated).
  */
@@ -80,6 +89,7 @@ public class UserService {
     private final AuthProperties authProperties;
     private final ClientService clientService;
     private final ApplicationEventPublisher events;
+    private final ObjectProvider<AccountEmailContributor> emailContributors;
     private final Clock clock;
 
     // =====================================================================================
@@ -262,6 +272,38 @@ public class UserService {
         return mapper.toResponse(user);
     }
 
+    /**
+     * A candidate asks to change the login email (staff emails never change). Needs the current password
+     * (same attempt limit as the other sensitive changes). Always the same outcome for the caller: the
+     * current address is told a change was asked; a free new address gets the confirmation link (24 h), an
+     * address already used by an account or by a candidate without an account only gets a notice and
+     * nothing changes (no enumeration, no merged profiles). A new request replaces the pending one.
+     */
+    @Transactional
+    public void requestEmailChange(AuthenticatedUser actor, EmailChangeRequest request) {
+        User user = find(actor.id());
+        if (user.getRole() != UserRole.CANDIDATE) {
+            throw new ForbiddenException();
+        }
+        confirmPassword(user, request.currentPassword(), "currentPassword");
+        String newEmail = normalizeEmail(request.newEmail());
+        if (newEmail.equals(user.getEmail())) {
+            throw new BusinessException("account.email.same", List.of(new FieldError("newEmail", "account.email.same")));
+        }
+        AuthProperties.Limit limit = authProperties.rateLimits().emailChange();
+        rateLimiter.check("email-change", user.getId().toString(), limit);
+        rateLimiter.check("email-change-address", newEmail, limit);
+
+        oneTimeTokens.invalidatePending(user.getId(), OneTimeTokenType.EMAIL_CHANGE);
+        events.publishEvent(new EmailChangeNoticeEvent(user.getEmail(), user.getName(), clock.instant()));
+        if (isEmailTaken(newEmail, user.getId())) {
+            events.publishEvent(new EmailAddressInUseEvent(newEmail));
+            return;
+        }
+        String token = oneTimeTokens.createEmailChangeToken(user.getId(), newEmail);
+        events.publishEvent(new EmailChangeRequestedEvent(newEmail, user.getName(), token));
+    }
+
     /** Sends the SMS code needed to enable two-step verification. */
     @Transactional
     public CodeSentResponse requestTwoFactorCode(AuthenticatedUser actor) {
@@ -365,6 +407,39 @@ public class UserService {
         if (user.getRole() == UserRole.CANDIDATE && user.getCandidateId() == null) {
             events.publishEvent(new CandidateEmailVerifiedEvent(user.getId(), user.getEmail(), user.getName(), user.getPhone()));
         }
+    }
+
+    /** Result of a confirmed email change: the address it replaced (for the security alert). */
+    public record AppliedEmailChange(String previousEmail, String name) {}
+
+    /**
+     * Applies a confirmed email change ({@code newEmail} lower case, from the token): {@code users.email} and
+     * every copy kept by other modules ({@link AccountEmailContributor}) change together, and the email
+     * stays verified (the link proved the new address). An account whose email was never confirmed gets its
+     * candidate profile now, with the new address.
+     *
+     * <p>Two confirmations for the same address at the same time: the unique constraints let only one win;
+     * the other answers 422 {@code account.email.taken} and nothing changes.
+     */
+    @Transactional
+    public AppliedEmailChange applyEmailChange(UUID userId, String newEmail) {
+        User user = find(userId);
+        if (user.getRole() != UserRole.CANDIDATE || !user.isActive()) {
+            throw new BusinessException("auth.token.invalid");
+        }
+        if (isEmailTaken(newEmail, userId)) {
+            throw new BusinessException("account.email.taken");
+        }
+        String previous = user.getEmail();
+        try {
+            user.changeEmail(newEmail);
+            emailContributors.orderedStream().forEach(contributor -> contributor.onAccountEmailChanged(userId, newEmail));
+            repository.flush();
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException("account.email.taken");
+        }
+        markEmailVerified(userId);
+        return new AppliedEmailChange(previous, user.getName());
     }
 
     // =====================================================================================
@@ -483,6 +558,12 @@ public class UserService {
         if (phone.equals(user.getPhone())) {
             throw new BusinessException("account.phone.same", List.of(new FieldError("phone", "account.phone.same")));
         }
+    }
+
+    /** Used by another account, or by a record of another module that is not this user's (candidates). */
+    private boolean isEmailTaken(String email, UUID userId) {
+        return repository.existsByEmail(email)
+                || emailContributors.orderedStream().anyMatch(contributor -> contributor.isEmailUsedByOthers(email, userId));
     }
 
     private void publishAlert(User user, SecurityAlertEvent.Kind kind) {

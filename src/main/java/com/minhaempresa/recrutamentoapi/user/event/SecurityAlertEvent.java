@@ -13,6 +13,8 @@ public record SecurityAlertEvent(String email, String name, Kind kind, Instant o
         PASSWORD_RESET,
         PHONE_CHANGED,
         TWO_FACTOR_ENABLED,
-        TWO_FACTOR_DISABLED
+        TWO_FACTOR_DISABLED,
+        /** Sent to the OLD address once the new one is confirmed. */
+        EMAIL_CHANGED
     }
 }

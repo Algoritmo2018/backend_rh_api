@@ -102,6 +102,8 @@ app:
     password-reset-ttl: 1h
     invitation-ttl: 7d
     email-verification-ttl: 48h
+    # Candidate email change: link sent to the new address
+    email-change-ttl: 24h
     max-failed-logins: 5
     lockout-duration: 15m
     refresh-cookie:
@@ -123,8 +125,10 @@ app:
       forgot-password-per-email: { max: 3, window: 1h }
       # Per email and per phone number
       register-per-identity: { max: 3, window: 1h }
-      # Per user: checks of the current password (change password, disable 2FA, change phone)
+      # Per user: checks of the current password (change password, disable 2FA, change phone, change email)
       password-confirmation: { max: 10, window: 15m }
+      # Candidate email-change requests, per user and per new address
+      email-change: { max: 5, window: 1h }
   contact:
     # Public forms "Precisa de recrutar?" and Contacto (CGNAT: per-IP generous, per-email strict)
     rate-limits:

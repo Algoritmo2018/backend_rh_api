@@ -25,9 +25,12 @@ public class User extends AuditableEntity {
     @Column(name = "name", nullable = false, length = 120)
     private String name;
 
-    /** Login identifier, always lower case; cannot be changed after creation. */
+    /**
+     * Login identifier, always lower case. Staff and client emails never change; a candidate's changes only
+     * through a confirmed email change ({@link #changeEmail}).
+     */
     @Setter(AccessLevel.NONE)
-    @Column(name = "email", nullable = false, length = 160, updatable = false)
+    @Column(name = "email", nullable = false, length = 160)
     private String email;
 
     /** E.164 ({@code +244923456789}); unique (used by the SMS-code login). */
@@ -115,6 +118,11 @@ public class User extends AuditableEntity {
         passwordHash = newPasswordHash;
         failedLoginAttempts = 0;
         lockedUntil = null;
+    }
+
+    /** New login email (lower case), after the owner confirmed it through the link sent to it. */
+    public void changeEmail(String newEmail) {
+        email = newEmail;
     }
 
     public void markEmailVerified(Instant now) {

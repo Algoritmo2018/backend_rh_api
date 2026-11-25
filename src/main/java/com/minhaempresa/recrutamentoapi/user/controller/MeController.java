@@ -4,6 +4,7 @@ import com.minhaempresa.recrutamentoapi.auth.dto.response.CodeSentResponse;
 import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import com.minhaempresa.recrutamentoapi.user.dto.request.ChangePasswordRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.ChangePhoneRequest;
+import com.minhaempresa.recrutamentoapi.user.dto.request.EmailChangeRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.PhoneCodeRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.TwoFactorRequest;
 import com.minhaempresa.recrutamentoapi.user.dto.request.UpdateMyProfileRequest;
@@ -12,6 +13,7 @@ import com.minhaempresa.recrutamentoapi.user.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -48,6 +50,17 @@ public class MeController {
     @PutMapping("/phone")
     public UserResponse changePhone(AuthenticatedUser actor, @Valid @RequestBody ChangePhoneRequest request) {
         return userService.changeMyPhone(actor, request);
+    }
+
+    /**
+     * Candidates only (staff emails never change). Always 204 once the password is right: the link goes
+     * to the new address, confirmed by {@code POST /auth/email/change/confirm}.
+     */
+    @PostMapping("/email/change")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void requestEmailChange(AuthenticatedUser actor, @Valid @RequestBody EmailChangeRequest request) {
+        userService.requestEmailChange(actor, request);
     }
 
     @PostMapping("/two-factor/code")

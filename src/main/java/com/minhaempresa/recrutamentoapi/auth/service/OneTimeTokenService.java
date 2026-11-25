@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
  * same type for that user. Every token expires and can be used once; codes allow a limited number of
  * attempts.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OneTimeTokenService {
@@ -68,6 +71,65 @@ public class OneTimeTokenService {
     @Transactional
     public UUID consumeEmailVerificationToken(String token) {
         return consumeLink(OneTimeTokenType.EMAIL_VERIFICATION, token);
+    }
+
+    /** A confirmed email-change link: whose account and which new address (lower case). */
+    public record EmailChangeTicket(UUID userId, String newEmail) {}
+
+    /**
+     * Link of a candidate's email change, bound to the user and to {@code newEmail} (lower case). Replaces
+     * the pending one: only the newest request can be confirmed.
+     */
+    @Transactional
+    public String createEmailChangeToken(UUID userId, String newEmail) {
+        Instant now = clock.instant();
+        repository.invalidatePending(userId, OneTimeTokenType.EMAIL_CHANGE, now);
+        String token = hasher.newToken();
+        repository.save(OneTimeToken.emailChange(userId, hasher.sha256(token), newEmail, now, now.plus(properties.emailChangeTtl())));
+        return token;
+    }
+
+    /** @throws BusinessException 422 "invalid or expired link" */
+    @Transactional
+    public EmailChangeTicket consumeEmailChangeToken(String token) {
+        Instant now = clock.instant();
+        OneTimeToken found = repository.findByTypeAndTokenHash(OneTimeTokenType.EMAIL_CHANGE, hasher.sha256(token))
+                .filter(t -> t.isUsable(now))
+                .orElseThrow(() -> new BusinessException("auth.token.invalid"));
+        found.markUsed(now);
+        return new EmailChangeTicket(found.getUserId(), found.getTargetEmail());
+    }
+
+    /**
+     * Spends the pending links of the given types (e.g. a password reset cancels a pending email change; an
+     * email change kills the links sent to the old address).
+     */
+    @Transactional
+    public void invalidatePending(UUID userId, OneTimeTokenType... types) {
+        Instant now = clock.instant();
+        for (OneTimeTokenType type : types) {
+            repository.invalidatePending(userId, type, now);
+        }
+    }
+
+    /** Candidate erasure: the pending email change (with its new address) disappears. */
+    @Transactional
+    public void deleteEmailChangeTokens(UUID userId) {
+        repository.deleteByUserAndType(userId, OneTimeTokenType.EMAIL_CHANGE);
+    }
+
+    /**
+     * Daily cleanup of tokens expired for more than a day (email-change tokens hold the new address:
+     * personal data is not kept longer than needed, Lei n.º 22/11).
+     */
+    @Scheduled(cron = "${app.auth.token-cleanup-cron:0 25 3 * * *}", zone = "${app.defaults.time-zone}")
+    @Transactional
+    public int deleteExpired() {
+        int deleted = repository.deleteExpiredBefore(clock.instant().minus(Duration.ofDays(1)));
+        if (deleted > 0) {
+            log.info("Deleted {} expired one-time tokens", deleted);
+        }
+        return deleted;
     }
 
     /** True if the user has an unused, unexpired invitation. */

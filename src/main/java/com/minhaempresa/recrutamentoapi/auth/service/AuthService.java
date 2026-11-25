@@ -1,6 +1,10 @@
 package com.minhaempresa.recrutamentoapi.auth.service;
 
 import com.minhaempresa.recrutamentoapi.auth.dto.request.AcceptInvitationRequest;
+import com.minhaempresa.recrutamentoapi.auth.dto.request.ConfirmEmailChangeRequest;
+import com.minhaempresa.recrutamentoapi.auth.entity.OneTimeTokenType;
+import com.minhaempresa.recrutamentoapi.auth.service.OneTimeTokenService.EmailChangeTicket;
+import com.minhaempresa.recrutamentoapi.user.service.UserService.AppliedEmailChange;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.ForgotPasswordRequest;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.LoginRequest;
 import com.minhaempresa.recrutamentoapi.auth.dto.request.OtpRequest;
@@ -196,13 +200,17 @@ public class AuthService {
         });
     }
 
-    /** New password from the emailed link; ends every session of the user. */
+    /**
+     * New password from the emailed link; ends every session of the user and cancels a pending email change
+     * (the owner reacting to the "email change requested" notice).
+     */
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         UUID userId = oneTimeTokens.consumePasswordResetToken(request.token());
         users.setPassword(userId, request.password());
         users.markEmailVerified(userId);
         refreshTokens.revokeAllSessions(userId);
+        oneTimeTokens.invalidatePending(userId, OneTimeTokenType.EMAIL_CHANGE);
         UserCredentials user = users.getCredentials(userId);
         events.publishEvent(new SecurityAlertEvent(user.email(), user.name(), SecurityAlertEvent.Kind.PASSWORD_RESET, clock.instant()));
     }
@@ -222,6 +230,24 @@ public class AuthService {
     @Transactional
     public void verifyEmail(VerifyEmailRequest request) {
         users.markEmailVerified(oneTimeTokens.consumeEmailVerificationToken(request.token()));
+    }
+
+    /**
+     * Confirms a candidate's email change with the link sent to the new address. In one transaction:
+     * {@code users.email} and {@code candidates.email} change, the email stays verified, the links sent to
+     * the old address stop working, every other session ends (the caller's own session, identified by its
+     * refresh cookie, is kept) and the old address gets a security alert.
+     *
+     * @param refreshToken the caller's refresh-token cookie, or {@code null}
+     */
+    @Transactional
+    public void confirmEmailChange(ConfirmEmailChangeRequest request, String refreshToken) {
+        EmailChangeTicket ticket = oneTimeTokens.consumeEmailChangeToken(request.token());
+        UUID userId = ticket.userId();
+        AppliedEmailChange applied = users.applyEmailChange(userId, ticket.newEmail());
+        oneTimeTokens.invalidatePending(userId, OneTimeTokenType.PASSWORD_RESET, OneTimeTokenType.EMAIL_VERIFICATION, OneTimeTokenType.EMAIL_CHANGE);
+        refreshTokens.revokeOtherSessions(userId, refreshTokens.sessionOf(refreshToken, userId).orElse(null));
+        events.publishEvent(new SecurityAlertEvent(applied.previousEmail(), applied.name(), SecurityAlertEvent.Kind.EMAIL_CHANGED, clock.instant()));
     }
 
     @Transactional

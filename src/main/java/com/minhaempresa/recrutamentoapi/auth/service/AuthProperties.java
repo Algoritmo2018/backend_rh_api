@@ -33,6 +33,7 @@ public record AuthProperties(
         @NotNull Duration passwordResetTtl,
         @NotNull Duration invitationTtl,
         @NotNull Duration emailVerificationTtl,
+        @NotNull Duration emailChangeTtl,
         @Min(1) int maxFailedLogins,
         @NotNull Duration lockoutDuration,
         @Valid @NotNull RefreshCookie refreshCookie,
@@ -54,6 +55,8 @@ public record AuthProperties(
      * @param forgotPasswordPerEmail per email address (counted whether the account exists or not)
      * @param registerPerIdentity per email and per phone number
      * @param passwordConfirmation per user, for operations that check the current password
+     * @param emailChange email-change requests, per user and per new address (each request emails the new
+     *     address, so this also protects third-party mailboxes from being flooded)
      */
     public record RateLimits(
             @Min(100) long maxEntries,
@@ -64,7 +67,8 @@ public record AuthProperties(
             @Valid @NotNull Limit register,
             @Valid @NotNull Limit forgotPasswordPerEmail,
             @Valid @NotNull Limit registerPerIdentity,
-            @Valid @NotNull Limit passwordConfirmation) {}
+            @Valid @NotNull Limit passwordConfirmation,
+            @Valid @NotNull Limit emailChange) {}
 
     /** At most {@code max} requests per {@code window}. */
     public record Limit(@Min(1) int max, @NotNull Duration window) {}

@@ -166,6 +166,11 @@ public class Candidate extends UserAuditableEntity {
         this.source = source;
     }
 
+    /** Follows the confirmed email change of the linked account (lower case). */
+    public void changeEmail(String newEmail) {
+        email = newEmail;
+    }
+
     public WorkExperience addExperience() {
         WorkExperience item = new WorkExperience(this);
         experience.add(item);

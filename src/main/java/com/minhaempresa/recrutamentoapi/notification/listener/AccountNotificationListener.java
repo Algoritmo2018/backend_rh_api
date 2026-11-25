@@ -15,6 +15,9 @@ import com.minhaempresa.recrutamentoapi.notification.service.EmailOutbox;
 import com.minhaempresa.recrutamentoapi.shared.config.AppProperties;
 import com.minhaempresa.recrutamentoapi.shared.i18n.Messages;
 import com.minhaempresa.recrutamentoapi.shared.web.FrontendLinks;
+import com.minhaempresa.recrutamentoapi.user.event.EmailAddressInUseEvent;
+import com.minhaempresa.recrutamentoapi.user.event.EmailChangeNoticeEvent;
+import com.minhaempresa.recrutamentoapi.user.event.EmailChangeRequestedEvent;
 import com.minhaempresa.recrutamentoapi.user.event.SecurityAlertEvent;
 import com.minhaempresa.recrutamentoapi.user.event.UserInvitedEvent;
 import java.time.format.DateTimeFormatter;
@@ -30,9 +33,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * Account emails and SMS codes, all of purpose {@code system}.
  *
  * <ul>
- *   <li>Secret links (invitation, password reset, email verification) and SMS codes: after the commit,
- *       asynchronously, sent directly ({@link DirectEmailSender}, attempts in memory) and never stored.
- *   <li>Security alerts: queued in the outbox in the transaction of the change (guaranteed delivery).
+ *   <li>Secret links (invitation, password reset, email verification, email change) and SMS codes: after
+ *       the commit, asynchronously, sent directly ({@link DirectEmailSender}, attempts in memory) and never
+ *       stored.
+ *   <li>Security alerts and the email-change notices: queued in the outbox in the transaction of the change
+ *       (guaranteed delivery).
  * </ul>
  */
 @Slf4j
@@ -70,6 +75,38 @@ public class AccountNotificationListener {
                 authProperties.emailVerificationTtl().toHours());
     }
 
+    /** Confirmation link of an email change, to the NEW address (secret link: direct, never stored). */
+    @Async
+    @TransactionalEventListener(fallbackExecution = true)
+    public void onEmailChangeRequested(EmailChangeRequestedEvent event) {
+        sendSecretLinkEmail(event.newEmail(), "email.email-change", event.name(), links.emailChange(event.token()),
+                authProperties.emailChangeTtl().toHours());
+    }
+
+    /** The current address is told that a change was asked (no secret: outbox). */
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
+    public void onEmailChangeNotice(EmailChangeNoticeEvent event) {
+        queue(event.email(), new ActionEmail(
+                messages.get("email.email-change-notice.subject"),
+                messages.get("email.layout.greeting", firstName(event.name())),
+                messages.get("email.email-change-notice.body", formatTime(event.requestedAt())),
+                messages.get("email.email-change-notice.action"),
+                links.forgotPassword(),
+                messages.get("email.email-change-notice.note")));
+    }
+
+    /** The asked address already belongs to someone: it is told so, without naming the requester. */
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
+    public void onEmailAddressInUse(EmailAddressInUseEvent event) {
+        queue(event.email(), new ActionEmail(
+                messages.get("email.email-in-use.subject"),
+                messages.get("email.email-in-use.greeting"),
+                messages.get("email.email-in-use.body"),
+                messages.get("email.email-in-use.action"),
+                links.login(),
+                messages.get("email.email-in-use.note")));
+    }
+
     @Async
     @TransactionalEventListener(fallbackExecution = true)
     public void onSmsCodeRequested(SmsCodeRequestedEvent event) {
@@ -94,18 +131,27 @@ public class AccountNotificationListener {
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
     public void onSecurityAlert(SecurityAlertEvent event) {
         String kind = event.kind().name().toLowerCase(Locale.ROOT).replace('_', '-');
-        String when = DateTimeFormatter.ofPattern(messages.get("format.date-time"))
-                .withZone(appProperties.defaults().timeZone())
-                .format(event.occurredAt());
-        ActionEmail email = new ActionEmail(
+        // The old address of an email change can no longer reset the password: point to the company instead
+        boolean emailChanged = event.kind() == SecurityAlertEvent.Kind.EMAIL_CHANGED;
+        queue(event.email(), new ActionEmail(
                 messages.get("email.security-alert.subject"),
                 messages.get("email.layout.greeting", firstName(event.name())),
-                messages.get("email.security-alert." + kind, when),
-                messages.get("email.security-alert.action"),
-                links.forgotPassword(),
-                messages.get("email.security-alert.note"));
+                messages.get("email.security-alert." + kind, formatTime(event.occurredAt())),
+                messages.get(emailChanged ? "email.security-alert.contact-action" : "email.security-alert.action"),
+                emailChanged ? links.contact() : links.forgotPassword(),
+                messages.get(emailChanged ? "email.security-alert.email-changed-note" : "email.security-alert.note")));
+    }
+
+    private void queue(String to, ActionEmail email) {
         RenderedEmail rendered = renderer.renderActionEmail(email);
-        outbox.enqueue(EmailPurpose.SYSTEM, event.email(), email.subject(), rendered.text(), rendered.html());
+        outbox.enqueue(EmailPurpose.SYSTEM, to, email.subject(), rendered.text(), rendered.html());
+    }
+
+    /** Date and time in Angola. */
+    private String formatTime(java.time.Instant instant) {
+        return DateTimeFormatter.ofPattern(messages.get("format.date-time"))
+                .withZone(appProperties.defaults().timeZone())
+                .format(instant);
     }
 
     /**

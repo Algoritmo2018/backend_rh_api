@@ -43,6 +43,7 @@ class SecurityConfig {
         AUTH + "/password/reset",
         AUTH + "/invitations/accept",
         AUTH + "/email/verify",
+        AUTH + "/email/change/confirm",
         "/actuator/health",
         "/actuator/health/**",
         "/v3/api-docs/**",

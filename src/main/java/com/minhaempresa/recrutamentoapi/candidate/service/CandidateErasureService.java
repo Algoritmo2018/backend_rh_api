@@ -1,5 +1,6 @@
 package com.minhaempresa.recrutamentoapi.candidate.service;
 
+import com.minhaempresa.recrutamentoapi.auth.service.OneTimeTokenService;
 import com.minhaempresa.recrutamentoapi.candidate.entity.Candidate;
 import com.minhaempresa.recrutamentoapi.candidate.entity.CandidateDocument;
 import com.minhaempresa.recrutamentoapi.candidate.entity.Consent;
@@ -42,6 +43,7 @@ public class CandidateErasureService {
     private final ErasureLogRepository erasureLogRepository;
     private final ObjectProvider<CandidateErasureContributor> contributors;
     private final StorageCleanup storageCleanup;
+    private final OneTimeTokenService oneTimeTokens;
     private final Messages messages;
     private final Clock clock;
 
@@ -55,6 +57,10 @@ public class CandidateErasureService {
         Instant now = clock.instant();
 
         contributors.orderedStream().forEach(contributor -> contributor.eraseCandidate(candidateId));
+        if (candidate.getUserId() != null) {
+            // A pending email change keeps the new address with its token: gone, and it can no longer be confirmed
+            oneTimeTokens.deleteEmailChangeTokens(candidate.getUserId());
+        }
 
         List<CandidateDocument> documents = documentRepository.findByCandidateIdOrderByUploadedAtDescIdDesc(candidateId);
         candidate.anonymize(messages.get("candidate.removed-name"), "removido-" + UUID.randomUUID() + "@anonimizado.invalid");
