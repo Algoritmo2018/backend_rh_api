@@ -4,7 +4,9 @@ import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.web.client.RestClient;
@@ -66,6 +68,18 @@ public class MailpitClient {
 
     public Email awaitEmailTo(String address) {
         return awaitEmailTo(address, 1);
+    }
+
+    /** Raw headers of a captured email (name → values), as received by the SMTP server. */
+    public Map<String, List<String>> headers(String id) {
+        JsonNode node = json.readTree(http.get().uri("/api/v1/message/{id}/headers", id).retrieve().body(String.class));
+        Map<String, List<String>> headers = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> header : node.properties()) {
+            List<String> values = new ArrayList<>();
+            header.getValue().forEach(value -> values.add(value.asString()));
+            headers.put(header.getKey(), values);
+        }
+        return headers;
     }
 
     private Email read(String id) {

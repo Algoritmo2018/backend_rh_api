@@ -18,10 +18,16 @@ import org.springframework.validation.annotation.Validated;
  * @param blockPrivateHosts refuse SMTP accounts whose host resolves to loopback, link-local or private
  *     networks ({@code true} in production)
  * @param outbox queued emails
+ * @param directRetryDelays waits between the in-memory attempts of emails that never go through the outbox
+ *     (secret links: invitation, password reset, email verification); its size + 1 = attempts (default 3)
  */
 @Validated
 @ConfigurationProperties(prefix = "app.mail")
-public record MailSenderProperties(@NotBlank String from, boolean blockPrivateHosts, @Valid @NotNull Outbox outbox) {
+public record MailSenderProperties(@NotBlank String from, boolean blockPrivateHosts, @Valid @NotNull Outbox outbox, List<Duration> directRetryDelays) {
+
+    public MailSenderProperties {
+        directRetryDelays = directRetryDelays == null ? List.of(Duration.ofSeconds(5), Duration.ofSeconds(30)) : List.copyOf(directRetryDelays);
+    }
 
     /**
      * @param pollInterval how often pending emails are sent

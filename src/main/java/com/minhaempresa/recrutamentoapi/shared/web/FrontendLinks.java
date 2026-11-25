@@ -65,6 +65,11 @@ public class FrontendLinks {
         return builder("/app/entrevistas").toUriString();
     }
 
+    /** Messages page of the internal panel (administrators and recruiters). */
+    public String messages() {
+        return builder("/app/mensagens").toUriString();
+    }
+
     /** Settings of the internal panel (administrators). */
     public String settings() {
         return builder("/app/configuracoes").toUriString();

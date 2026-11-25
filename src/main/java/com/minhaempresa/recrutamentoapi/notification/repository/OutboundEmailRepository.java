@@ -2,6 +2,7 @@ package com.minhaempresa.recrutamentoapi.notification.repository;
 
 import com.minhaempresa.recrutamentoapi.notification.entity.OutboundEmail;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -22,6 +23,10 @@ public interface OutboundEmailRepository extends JpaRepository<OutboundEmail, UU
             LIMIT 1
             FOR UPDATE SKIP LOCKED""", nativeQuery = true)
     Optional<OutboundEmail> claimNextDue(@Param("now") Instant now);
+
+    @Modifying
+    @Query("DELETE FROM OutboundEmail e WHERE e.referenceId IN :referenceIds")
+    int deleteByReferenceIdIn(@Param("referenceIds") Collection<UUID> referenceIds);
 
     /** Retention: delivered emails (their bodies have personal data) and old failures. */
     @Modifying

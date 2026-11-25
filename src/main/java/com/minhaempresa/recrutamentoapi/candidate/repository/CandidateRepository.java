@@ -29,6 +29,13 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID>, Can
             ORDER BY full_name, id LIMIT :limit""", nativeQuery = true)
     List<UUID> quickSearch(@Param("pattern") String pattern, @Param("limit") int limit);
 
+    /** Name contains the term (case and accents ignored); {@code pattern} is already escaped and wrapped in {@code %}. */
+    @Query(value = """
+            SELECT id FROM candidates
+            WHERE unaccent(lower(full_name)) LIKE unaccent(lower(:pattern)) ESCAPE '\\'
+            ORDER BY full_name, id LIMIT :limit""", nativeQuery = true)
+    List<UUID> findIdsByNameContaining(@Param("pattern") String pattern, @Param("limit") int limit);
+
     /** Candidates per tag (link table {@code candidate_tags}). */
     @Query(value = "SELECT tag_id AS tagId, COUNT(*) AS total FROM candidate_tags GROUP BY tag_id", nativeQuery = true)
     List<TagCount> countByTag();

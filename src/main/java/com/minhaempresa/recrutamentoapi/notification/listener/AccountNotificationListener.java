@@ -7,8 +7,11 @@ import com.minhaempresa.recrutamentoapi.auth.service.AuthProperties;
 import com.minhaempresa.recrutamentoapi.notification.email.ActionEmail;
 import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer;
 import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer.RenderedEmail;
+import com.minhaempresa.recrutamentoapi.notification.entity.EmailPurpose;
 import com.minhaempresa.recrutamentoapi.notification.sender.NotificationDispatcher;
 import com.minhaempresa.recrutamentoapi.notification.sender.OutboundNotification;
+import com.minhaempresa.recrutamentoapi.notification.service.DirectEmailSender;
+import com.minhaempresa.recrutamentoapi.notification.service.EmailOutbox;
 import com.minhaempresa.recrutamentoapi.shared.config.AppProperties;
 import com.minhaempresa.recrutamentoapi.shared.i18n.Messages;
 import com.minhaempresa.recrutamentoapi.shared.web.FrontendLinks;
@@ -20,12 +23,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Account emails and SMS codes. Runs after the transaction that requested them commits (nothing is
- * sent if it rolls back) and asynchronously (the request does not wait for the SMTP server). A failed
- * delivery is logged; guaranteed delivery (outbox) is planned for a later stage.
+ * Account emails and SMS codes, all of purpose {@code system}.
+ *
+ * <ul>
+ *   <li>Secret links (invitation, password reset, email verification) and SMS codes: after the commit,
+ *       asynchronously, sent directly ({@link DirectEmailSender}, attempts in memory) and never stored.
+ *   <li>Security alerts: queued in the outbox in the transaction of the change (guaranteed delivery).
+ * </ul>
  */
 @Slf4j
 @Component
@@ -33,6 +41,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class AccountNotificationListener {
 
     private final NotificationDispatcher dispatcher;
+    private final DirectEmailSender directSender;
+    private final EmailOutbox outbox;
     private final EmailTemplateRenderer renderer;
     private final FrontendLinks links;
     private final Messages messages;
@@ -42,21 +52,21 @@ public class AccountNotificationListener {
     @Async
     @TransactionalEventListener(fallbackExecution = true)
     public void onUserInvited(UserInvitedEvent event) {
-        sendActionEmail(event.email(), "email.invitation", event.name(), links.invitation(event.token()),
+        sendSecretLinkEmail(event.email(), "email.invitation", event.name(), links.invitation(event.token()),
                 authProperties.invitationTtl().toDays());
     }
 
     @Async
     @TransactionalEventListener(fallbackExecution = true)
     public void onPasswordResetRequested(PasswordResetRequestedEvent event) {
-        sendActionEmail(event.email(), "email.password-reset", event.name(), links.passwordReset(event.token()),
+        sendSecretLinkEmail(event.email(), "email.password-reset", event.name(), links.passwordReset(event.token()),
                 authProperties.passwordResetTtl().toHours());
     }
 
     @Async
     @TransactionalEventListener(fallbackExecution = true)
     public void onEmailVerificationRequested(EmailVerificationRequestedEvent event) {
-        sendActionEmail(event.email(), "email.email-verification", event.name(), links.emailVerification(event.token()),
+        sendSecretLinkEmail(event.email(), "email.email-verification", event.name(), links.emailVerification(event.token()),
                 authProperties.emailVerificationTtl().toHours());
     }
 
@@ -69,53 +79,48 @@ public class AccountNotificationListener {
             case PHONE_CHANGE -> "sms.phone-change-code";
         };
         String text = messages.get(key, event.code(), event.validity().toMinutes());
-        deliver(OutboundNotification.sms(event.phone(), text));
+        OutboundNotification sms = OutboundNotification.sms(event.phone(), text);
+        try {
+            dispatcher.send(sms);
+        } catch (RuntimeException e) {
+            log.error("Could not deliver {}", sms, e);
+        }
     }
 
     /**
      * Tells the owner what changed and when (in Angola time), with a button to reset the password in
-     * case it was not them.
+     * case it was not them. Queued before the commit: no alert for a change that rolled back.
      */
-    @Async
-    @TransactionalEventListener(fallbackExecution = true)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
     public void onSecurityAlert(SecurityAlertEvent event) {
         String kind = event.kind().name().toLowerCase(Locale.ROOT).replace('_', '-');
         String when = DateTimeFormatter.ofPattern(messages.get("format.date-time"))
                 .withZone(appProperties.defaults().timeZone())
                 .format(event.occurredAt());
-        send(event.email(), new ActionEmail(
+        ActionEmail email = new ActionEmail(
                 messages.get("email.security-alert.subject"),
                 messages.get("email.layout.greeting", firstName(event.name())),
                 messages.get("email.security-alert." + kind, when),
                 messages.get("email.security-alert.action"),
                 links.forgotPassword(),
-                messages.get("email.security-alert.note")));
+                messages.get("email.security-alert.note"));
+        RenderedEmail rendered = renderer.renderActionEmail(email);
+        outbox.enqueue(EmailPurpose.SYSTEM, event.email(), email.subject(), rendered.text(), rendered.html());
     }
 
     /**
      * @param prefix message-key prefix: {@code .subject}, {@code .body}, {@code .action}, {@code .expiry}
      */
-    private void sendActionEmail(String to, String prefix, String name, String url, long validity) {
-        send(to, new ActionEmail(
+    private void sendSecretLinkEmail(String to, String prefix, String name, String url, long validity) {
+        ActionEmail email = new ActionEmail(
                 messages.get(prefix + ".subject"),
                 messages.get("email.layout.greeting", firstName(name)),
                 messages.get(prefix + ".body"),
                 messages.get(prefix + ".action"),
                 url,
-                messages.get(prefix + ".expiry", validity)));
-    }
-
-    private void send(String to, ActionEmail email) {
+                messages.get(prefix + ".expiry", validity));
         RenderedEmail rendered = renderer.renderActionEmail(email);
-        deliver(OutboundNotification.email(to, email.subject(), rendered.text(), rendered.html()));
-    }
-
-    private void deliver(OutboundNotification notification) {
-        try {
-            dispatcher.send(notification);
-        } catch (RuntimeException e) {
-            log.error("Could not deliver {}", notification, e);
-        }
+        directSender.send(OutboundNotification.email(EmailPurpose.SYSTEM, to, email.subject(), rendered.text(), rendered.html()));
     }
 
     private static String firstName(String name) {

@@ -21,7 +21,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The SMTP connection and sender of each purpose. The route is read from the database on every send, so
@@ -48,7 +47,11 @@ public class MailSenderRegistry {
 
     private record Cached(Instant version, JavaMailSenderImpl sender) {}
 
-    @Transactional(readOnly = true)
+    /**
+     * Not {@code @Transactional} on purpose: the outbox worker calls it inside its own transaction, and an
+     * exception leaving a transactional proxy (blocked host, undecryptable password) would mark that
+     * transaction rollback-only and lose the record of the failed attempt.
+     */
     public ResolvedSender forPurpose(EmailPurpose purpose) {
         Optional<EmailAccount> account = routes.findByPurpose(purpose)
                 .flatMap(route -> accounts.findById(route.getAccountId()))

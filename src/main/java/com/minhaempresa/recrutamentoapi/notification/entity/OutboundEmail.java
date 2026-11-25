@@ -9,6 +9,7 @@ import jakarta.persistence.Table;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -67,7 +68,22 @@ public class OutboundEmail extends BaseEntity {
     @Column(name = "sent_at")
     private Instant sentAt;
 
+    /** Record this email belongs to (e.g. a message to a candidate); {@code null} for notices. */
+    @Column(name = "reference_id", updatable = false)
+    private UUID referenceId;
+
+    /** Told in the bell if the email fails for good; {@code null} = the administrators. */
+    @Column(name = "notify_user_id", updatable = false)
+    private UUID notifyUserId;
+
     public OutboundEmail(EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody, Instant now) {
+        this(purpose, recipient, subject, textBody, htmlBody, now, null, null);
+    }
+
+    public OutboundEmail(EmailPurpose purpose, String recipient, String subject, String textBody, String htmlBody, Instant now,
+            UUID referenceId, UUID notifyUserId) {
+        this.referenceId = referenceId;
+        this.notifyUserId = notifyUserId;
         this.purpose = purpose;
         this.recipient = recipient;
         this.subject = subject.length() > 500 ? subject.substring(0, 500) : subject;

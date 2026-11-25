@@ -39,6 +39,9 @@ app:
     block-private-hosts: false
     outbox:
       poll-interval: 2s
+  secrets:
+    # Development-only key for the SMTP passwords of the settings. Never use it outside a local machine.
+    key: ${APP_SECRETS_KEY:zbVfZbP3Hdq2X7dO1Bxs/8MapYtrzvoeXMnz4d1WNhI=}
   storage:
     s3:
       # MinIO of docker-compose.yml (credentials from .env, same variables as the container)

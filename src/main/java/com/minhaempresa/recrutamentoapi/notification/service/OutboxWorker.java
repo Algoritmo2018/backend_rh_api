@@ -1,6 +1,8 @@
 package com.minhaempresa.recrutamentoapi.notification.service;
 
 import com.minhaempresa.recrutamentoapi.notification.entity.NotificationType;
+import com.minhaempresa.recrutamentoapi.notification.event.OutboundEmailStatusEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.minhaempresa.recrutamentoapi.notification.entity.OutboundEmail;
 import com.minhaempresa.recrutamentoapi.notification.repository.OutboundEmailRepository;
 import com.minhaempresa.recrutamentoapi.notification.sender.EmailNotificationSender;
@@ -12,6 +14,8 @@ import com.minhaempresa.recrutamentoapi.user.service.UserContact;
 import com.minhaempresa.recrutamentoapi.user.service.UserService;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -26,7 +30,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * row is marked sent, the email is sent again later. This rare duplicate is accepted.
  *
  * <p>A failed attempt is retried after {@code app.mail.outbox.retry-delays}; after the last one the email
- * is {@code failed} and the administrators get a notification in the bell.
+ * is {@code failed} and its sender (or, for system emails, the administrators) gets a notification in the bell.
  */
 @Slf4j
 @Component
@@ -41,6 +45,7 @@ public class OutboxWorker {
     private final Messages messages;
     private final MailSenderProperties properties;
     private final TransactionTemplate transactions;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     @Scheduled(fixedDelayString = "${app.mail.outbox.poll-interval}", initialDelayString = "${app.mail.outbox.poll-interval}")
@@ -67,15 +72,43 @@ public class OutboxWorker {
             try {
                 sender.send(OutboundNotification.email(email.getPurpose(), email.getRecipient(), email.getSubject(), email.getTextBody(), email.getHtmlBody()));
                 email.markSent(clock.instant());
+                publishStatus(email, true);
             } catch (RuntimeException e) {
                 boolean failed = email.markAttemptFailed(clock.instant(), properties.outbox().retryDelays(), safeError(e));
                 log.warn("Email {} attempt {} failed: {}", email.getId(), email.getAttempts(), safeError(e));
                 if (failed) {
-                    tellAdministrators(email);
+                    tellAboutFailure(email);
+                    publishStatus(email, false);
                 }
             }
             return true;
         }).orElse(false);
+    }
+
+    /** In this transaction: the owner of the email (e.g. a message) updates its status with the outbox row. */
+    private void publishStatus(OutboundEmail email, boolean sent) {
+        if (email.getReferenceId() != null) {
+            events.publishEvent(new OutboundEmailStatusEvent(email.getReferenceId(), sent, sent ? null : email.getLastError()));
+        }
+    }
+
+    /**
+     * The bell of who sent it (e.g. the recruiter of a message to a candidate), pointing to the messages;
+     * the administrators (pointing to the sending accounts) for system emails, automatic sends, or when
+     * that user was deleted or deactivated.
+     */
+    private void tellAboutFailure(OutboundEmail email) {
+        Optional<UserContact> sender = email.getNotifyUserId() == null ? Optional.empty() : userService.findActiveContact(email.getNotifyUserId());
+        if (sender.isEmpty()) {
+            tellAdministrators(email);
+            return;
+        }
+        notifications.notify(
+                List.of(sender.get().id()),
+                NotificationType.EMAIL_FAILED,
+                messages.get("notification.email-failed.title"),
+                messages.get("notification.email-failed.sender.body", email.getSubject(), email.getRecipient()),
+                links.inAppPath(links.messages()));
     }
 
     private void tellAdministrators(OutboundEmail email) {

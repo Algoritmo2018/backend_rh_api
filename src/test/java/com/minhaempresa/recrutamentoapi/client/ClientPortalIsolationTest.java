@@ -68,6 +68,8 @@ class ClientPortalIsolationTest {
     @BeforeEach
     void setUp() throws Exception {
         api = new AuthApi(mvc, TestUsers.randomIp());
+        // Known state: job requests email every administrator; none of the earlier tests' admins
+        users.deactivateTestAdministrators();
         clientA = users.createClient("Empresa A " + UUID.randomUUID().toString().substring(0, 4), true);
         clientB = users.createClient("Empresa B " + UUID.randomUUID().toString().substring(0, 4), true);
         userA = users.createClientUser(clientA);

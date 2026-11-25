@@ -9,7 +9,12 @@ public class TooManyRequestsException extends ApiException {
     private final Duration retryAfter;
 
     public TooManyRequestsException(Duration retryAfter) {
-        super("auth.too-many-requests");
+        this("auth.too-many-requests", retryAfter);
+    }
+
+    /** @param messageKey message of the limit that was reached (e.g. messages per day) */
+    public TooManyRequestsException(String messageKey, Duration retryAfter) {
+        super(messageKey);
         this.retryAfter = retryAfter;
     }
 

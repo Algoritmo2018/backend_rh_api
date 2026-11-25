@@ -8,50 +8,59 @@ import com.minhaempresa.recrutamentoapi.client.event.JobRequestReviewedEvent;
 import com.minhaempresa.recrutamentoapi.notification.email.ActionEmail;
 import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer;
 import com.minhaempresa.recrutamentoapi.notification.email.EmailTemplateRenderer.RenderedEmail;
-import com.minhaempresa.recrutamentoapi.notification.sender.NotificationDispatcher;
-import com.minhaempresa.recrutamentoapi.notification.sender.OutboundNotification;
+import com.minhaempresa.recrutamentoapi.notification.entity.EmailPurpose;
+import com.minhaempresa.recrutamentoapi.notification.entity.NotificationType;
+import com.minhaempresa.recrutamentoapi.notification.service.EmailOutbox;
+import com.minhaempresa.recrutamentoapi.notification.service.NotificationService;
 import com.minhaempresa.recrutamentoapi.shared.i18n.Messages;
 import com.minhaempresa.recrutamentoapi.shared.web.FrontendLinks;
 import com.minhaempresa.recrutamentoapi.user.service.UserContact;
 import com.minhaempresa.recrutamentoapi.user.service.UserService;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Emails about client activity: new job requests and public contact requests (to the administrators),
- * and the review of a job request (to the client user who made it). In-app notifications are added in
- * stage 7. Values typed by users (names, titles, messages) are escaped by the email templates.
+ * Client activity (purpose {@code clients}): new job requests and public contact requests (email and bell
+ * to every active administrator), and the review of a job request (email and bell to the client user who
+ * made it). Emails go through the outbox and the bell is written in the same transaction as the event.
+ * Values typed by users (names, titles, messages) are escaped by the email templates.
  */
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class ClientNotificationListener {
 
-    private final NotificationDispatcher dispatcher;
+    private final EmailOutbox outbox;
+    private final NotificationService notifications;
     private final EmailTemplateRenderer renderer;
     private final FrontendLinks links;
     private final Messages messages;
     private final UserService userService;
 
-    @Async
-    @TransactionalEventListener(fallbackExecution = true)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
     public void onJobRequestCreated(JobRequestCreatedEvent event) {
-        for (UserContact admin : userService.activeAdministrators()) {
-            send(admin, new ActionEmail(
+        List<UserContact> admins = userService.activeAdministrators();
+        String link = links.clientJobRequests(event.clientId());
+        for (UserContact admin : admins) {
+            queue(admin, new ActionEmail(
                     messages.get("email.job-request-created.subject"),
                     greeting(admin),
                     messages.get("email.job-request-created.body", event.clientName(), event.title()),
                     messages.get("email.job-request-created.action"),
-                    links.clientJobRequests(event.clientId()),
+                    link,
                     messages.get("email.job-request-created.note")));
         }
+        notifications.notify(
+                admins.stream().map(UserContact::id).toList(),
+                NotificationType.JOB_REQUEST_CREATED,
+                messages.get("notification.job-request-created.title"),
+                messages.get("notification.job-request-created.body", event.clientName(), event.title()),
+                links.inAppPath(link));
     }
 
-    @Async
-    @TransactionalEventListener(fallbackExecution = true)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
     public void onJobRequestReviewed(JobRequestReviewedEvent event) {
         if (event.requestedById() == null) {
             return;
@@ -62,33 +71,50 @@ public class ClientNotificationListener {
             String body = converted
                     ? messages.get(prefix + ".body", event.title())
                     : messages.get(prefix + ".body", event.title(), event.note());
-            send(user, new ActionEmail(
+            String link = links.clientPortalJobRequests();
+            queue(user, new ActionEmail(
                     messages.get(prefix + ".subject"),
                     greeting(user),
                     body,
                     messages.get("email.job-request-reviewed.action"),
-                    links.clientPortalJobRequests(),
+                    link,
                     messages.get("email.job-request-reviewed.note")));
+            String bellPrefix = converted ? "notification.job-request-converted" : "notification.job-request-rejected";
+            notifications.notify(
+                    List.of(user.id()),
+                    NotificationType.JOB_REQUEST_REVIEWED,
+                    messages.get(bellPrefix + ".title"),
+                    messages.get(bellPrefix + ".body", event.title()),
+                    links.inAppPath(link));
         });
     }
 
-    @Async
-    @TransactionalEventListener(fallbackExecution = true)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT, fallbackExecution = true)
     public void onContactRequestReceived(ContactRequestReceivedEvent event) {
         boolean company = event.kind() == ContactRequestKind.COMPANY;
         String body = company
                 ? messages.get("email.contact-request.company.body", event.company(), event.name(), event.vacancies(), event.email(), event.phone(), event.message())
                 : messages.get("email.contact-request.general.body", event.name(), event.email(), event.phone(), event.message());
         String subject = messages.get(company ? "email.contact-request.company.subject" : "email.contact-request.general.subject");
-        for (UserContact admin : userService.activeAdministrators()) {
-            send(admin, new ActionEmail(
+        List<UserContact> admins = userService.activeAdministrators();
+        String link = links.clients();
+        for (UserContact admin : admins) {
+            queue(admin, new ActionEmail(
                     subject,
                     greeting(admin),
                     body,
                     messages.get("email.contact-request.action"),
-                    links.clients(),
+                    link,
                     messages.get("email.contact-request.note")));
         }
+        notifications.notify(
+                admins.stream().map(UserContact::id).toList(),
+                NotificationType.CONTACT_REQUEST_RECEIVED,
+                messages.get(company ? "notification.contact-request.company.title" : "notification.contact-request.general.title"),
+                company
+                        ? messages.get("notification.contact-request.company.body", event.company(), event.name())
+                        : messages.get("notification.contact-request.general.body", event.name()),
+                links.inAppPath(link));
     }
 
     private String greeting(UserContact user) {
@@ -96,12 +122,8 @@ public class ClientNotificationListener {
         return messages.get("email.layout.greeting", name);
     }
 
-    private void send(UserContact to, ActionEmail email) {
-        try {
-            RenderedEmail rendered = renderer.renderActionEmail(email);
-            dispatcher.send(OutboundNotification.email(to.email(), email.subject(), rendered.text(), rendered.html()));
-        } catch (RuntimeException e) {
-            log.error("Could not deliver the email \"{}\" to {}", email.subject(), to, e);
-        }
+    private void queue(UserContact to, ActionEmail email) {
+        RenderedEmail rendered = renderer.renderActionEmail(email);
+        outbox.enqueue(EmailPurpose.CLIENTS, to.email(), email.subject(), rendered.text(), rendered.html());
     }
 }

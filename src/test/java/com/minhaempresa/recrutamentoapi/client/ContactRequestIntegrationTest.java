@@ -51,6 +51,8 @@ class ContactRequestIntegrationTest {
         // Every test only reads the emails of the administrator it creates
         mailpit.deleteAll();
         admin = users.create(UserRole.ADMIN);
+        // Known state: only this test's administrator gets the emails "to every administrator"
+        users.deactivateOtherAdministrators(admin);
     }
 
     /** Body as the frontend ContactForm sends it (no login). */

@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.minhaempresa.recrutamentoapi.IntegrationTest;
 import com.minhaempresa.recrutamentoapi.support.AuthApi;
+import com.minhaempresa.recrutamentoapi.support.Bell;
 import com.minhaempresa.recrutamentoapi.support.JobBodies;
 import com.minhaempresa.recrutamentoapi.support.MailpitClient;
 import com.minhaempresa.recrutamentoapi.support.MailpitClient.Email;
@@ -15,6 +16,7 @@ import com.minhaempresa.recrutamentoapi.support.TestUsers.TestUser;
 import com.minhaempresa.recrutamentoapi.user.entity.UserRole;
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +57,8 @@ class JobRequestIntegrationTest {
         // Every test only reads the emails of the users it creates
         mailpit.deleteAll();
         admin = users.create(UserRole.ADMIN);
+        // Known state: only this test's administrator gets the emails "to every administrator"
+        users.deactivateOtherAdministrators(admin);
         clientId = users.createClient("Logística Atlântico " + UUID.randomUUID().toString().substring(0, 4), true);
         clientUser = users.createClientUser(clientId);
     }
@@ -114,6 +118,15 @@ class JobRequestIntegrationTest {
         Email email = mailpit.awaitEmailTo(admin.email());
         assertThat(email.subject()).isEqualTo("Novo pedido de vaga");
         assertThat(email.text()).contains("Motorista de pesados").contains("/app/clientes/" + clientId + "?separador=pedidos");
+
+        // ... and in their bell (written with the request, no wait)
+        assertThat(Bell.of(jdbc, admin.id())).singleElement().satisfies(bell -> {
+            assertThat(bell.type()).isEqualTo("JOB_REQUEST_CREATED");
+            assertThat(bell.title()).isEqualTo("Novo pedido de vaga");
+            assertThat(bell.body()).startsWith("Logística Atlântico").endsWith("pediu a vaga Motorista de pesados.");
+            assertThat(bell.link()).isEqualTo("/app/clientes/" + clientId + "?separador=pedidos");
+        });
+        assertThat(Bell.of(jdbc, clientUser.id())).isEmpty();
     }
 
     @Test
@@ -182,6 +195,15 @@ class JobRequestIntegrationTest {
         Email email = mailpit.awaitEmailTo(clientUser.email(), 2);
         assertThat(email.subject()).isEqualTo("Pedido de vaga recusado");
         assertThat(email.text()).contains("/cliente/pedir-vaga");
+
+        // One bell notification per rejection (two requests), never for the refused attempts
+        List<Bell.Entry> bell = Bell.of(jdbc, clientUser.id());
+        assertThat(bell).hasSize(2).allSatisfy(entry -> {
+            assertThat(entry.type()).isEqualTo("JOB_REQUEST_REVIEWED");
+            assertThat(entry.title()).isEqualTo("Pedido de vaga não aprovado");
+            assertThat(entry.body()).isEqualTo("O seu pedido para a vaga Motorista de pesados não foi aprovado. Veja o motivo no portal.");
+            assertThat(entry.link()).isEqualTo("/cliente/pedir-vaga");
+        });
     }
 
     @Test
@@ -202,6 +224,12 @@ class JobRequestIntegrationTest {
                 .andExpect(jsonPath("$.jobId").value(jobId));
         Email email = mailpit.awaitEmailTo(clientUser.email());
         assertThat(email.subject()).isEqualTo("Pedido de vaga aceite");
+        assertThat(Bell.of(jdbc, clientUser.id())).singleElement().satisfies(bell -> {
+            assertThat(bell.type()).isEqualTo("JOB_REQUEST_REVIEWED");
+            assertThat(bell.title()).isEqualTo("Pedido de vaga aprovado");
+            assertThat(bell.body()).isEqualTo("O seu pedido para a vaga Motorista de pesados foi aprovado e a vaga foi criada.");
+            assertThat(bell.link()).isEqualTo("/cliente/pedir-vaga");
+        });
         review(id, "rejected", "Tarde demais para recusar").andExpect(status().isUnprocessableContent());
     }
 

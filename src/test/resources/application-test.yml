@@ -37,6 +37,14 @@ app:
     outbox:
       # Emails leave quickly in tests (they are awaited in Mailpit)
       poll-interval: 200ms
+      # Large batches so bursts leave quickly (tests that email "every administrator" also deactivate
+      # the admins of earlier tests: the worker sends one email at a time)
+      batch-size: 200
+    # Secret-link emails: short waits between the in-memory attempts
+    direct-retry-delays: [100ms, 100ms]
+  secrets:
+    # Test-only key (never used outside the tests)
+    key: NtGCNlmCQc0S2GQQDJnT7Bj5ECw9ZHdeLVBFwgH3O7s=
   storage:
     local:
       root: ${java.io.tmpdir}/recrutamento-api-test-uploads

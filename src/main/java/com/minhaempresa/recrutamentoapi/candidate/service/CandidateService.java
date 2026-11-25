@@ -279,6 +279,36 @@ public class CandidateService {
         find(candidateId).setInTalentPool(inTalentPool);
     }
 
+    // =====================================================================================
+    // Contacts (messages module)
+    // =====================================================================================
+
+    /** @throws NotFoundException if there is no such candidate */
+    @Transactional(readOnly = true)
+    public CandidateContact getContact(UUID candidateId) {
+        return toContact(find(candidateId));
+    }
+
+    /** Contacts by id (missing ids are left out). */
+    @Transactional(readOnly = true)
+    public Map<UUID, CandidateContact> contactsOf(Collection<UUID> candidateIds) {
+        if (candidateIds.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(Set.copyOf(candidateIds)).stream().collect(Collectors.toMap(Candidate::getId, CandidateService::toContact));
+    }
+
+    /** Ids of candidates whose name contains the term (accents and case ignored), at most {@code limit}. */
+    @Transactional(readOnly = true)
+    public List<UUID> idsByName(String term, int limit) {
+        String escaped = term.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return escaped.isEmpty() ? List.of() : repository.findIdsByNameContaining("%" + escaped + "%", limit);
+    }
+
+    private static CandidateContact toContact(Candidate c) {
+        return new CandidateContact(c.getId(), c.getFullName(), c.getEmail(), c.getPhone(), c.getWhatsapp());
+    }
+
     /** Candidates by id, in the given order (missing ids are skipped). Entities: this module only. */
     List<Candidate> load(Collection<UUID> ids) {
         Map<UUID, Candidate> byId = repository.findAllById(ids).stream().collect(Collectors.toMap(Candidate::getId, c -> c));

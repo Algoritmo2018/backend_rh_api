@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.minhaempresa.recrutamentoapi.IntegrationTest;
 import com.minhaempresa.recrutamentoapi.support.AuthApi;
+import com.minhaempresa.recrutamentoapi.support.Bell;
 import com.minhaempresa.recrutamentoapi.support.JobBodies;
 import com.minhaempresa.recrutamentoapi.support.MailpitClient;
 import com.minhaempresa.recrutamentoapi.support.MailpitClient.Email;
@@ -242,6 +243,19 @@ class JobIntegrationTest {
             Email toInterviewer = mailpit.awaitEmailTo(interviewer.email());
             assertThat(toInterviewer.text()).contains("entrevistador da vaga Mecânico Industrial").contains("/app/entrevistas");
             assertThat(mailpit.countTo(admin.email())).isZero();
+
+            String jobId = job.path("id").asString();
+            assertThat(Bell.of(jdbc, recruiter.id())).singleElement().satisfies(bell -> {
+                assertThat(bell.type()).isEqualTo("JOB_ASSIGNED");
+                assertThat(bell.title()).isEqualTo("Nova vaga atribuída");
+                assertThat(bell.body()).isEqualTo("Foi indicado como recrutador responsável pela vaga Mecânico Industrial.");
+                assertThat(bell.link()).isEqualTo("/app/vagas/" + jobId);
+            });
+            assertThat(Bell.of(jdbc, interviewer.id())).singleElement().satisfies(bell -> {
+                assertThat(bell.body()).isEqualTo("Foi indicado como entrevistador da vaga Mecânico Industrial.");
+                assertThat(bell.link()).isEqualTo("/app/entrevistas");
+            });
+            assertThat(Bell.of(jdbc, admin.id())).isEmpty();
         }
     }
 

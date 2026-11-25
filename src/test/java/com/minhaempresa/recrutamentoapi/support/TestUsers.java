@@ -60,6 +60,20 @@ public class TestUsers {
         return new TestUser(user.getId(), email, phone, role);
     }
 
+    /**
+     * For tests of emails sent to "every active administrator": deactivates the administrators created by
+     * earlier tests, so the outbox only has this test's emails to send (it sends them one by one). The
+     * bootstrap administrator (no password) is kept.
+     */
+    public void deactivateOtherAdministrators(TestUser keep) {
+        jdbc.update("UPDATE users SET active = FALSE WHERE role = 'ADMIN' AND active AND password_hash IS NOT NULL AND id <> ?", keep.id());
+    }
+
+    /** Same, for tests that cause emails to every administrator without checking them. */
+    public void deactivateTestAdministrators() {
+        jdbc.update("UPDATE users SET active = FALSE WHERE role = 'ADMIN' AND active AND password_hash IS NOT NULL");
+    }
+
     /** A client-portal user (with password) of the given company. */
     public TestUser createClientUser(UUID clientId) {
         int n = SEQUENCE.incrementAndGet();

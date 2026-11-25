@@ -59,6 +59,12 @@ public class ConsentService {
         return list(candidateId);
     }
 
+    /** Whether the candidate has an active (not revoked) general consent of this type (talent pool, marketing). */
+    @Transactional(readOnly = true)
+    public boolean hasActive(UUID candidateId, ConsentType type) {
+        return repository.findByCandidateIdAndTypeAndJobIdIsNullAndRevokedAtIsNull(candidateId, type).isPresent();
+    }
+
     private List<ConsentResponse> list(UUID candidateId) {
         return repository.findByCandidateIdOrderByGrantedAtDescIdDesc(candidateId).stream().map(mapper::toConsentResponse).toList();
     }

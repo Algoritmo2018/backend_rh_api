@@ -21,6 +21,10 @@ public record OutboundNotification(NotificationChannel channel, EmailPurpose pur
         return new OutboundNotification(NotificationChannel.SMS, null, phone, null, text, null);
     }
 
+    public static OutboundNotification whatsapp(String phone, String text) {
+        return new OutboundNotification(NotificationChannel.WHATSAPP, null, phone, null, text, null);
+    }
+
     @Override
     public String toString() {
         return "OutboundNotification(channel=" + channel + ", purpose=" + purpose + ")";

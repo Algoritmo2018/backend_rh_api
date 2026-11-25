@@ -166,6 +166,14 @@ app:
       retry-delays: [1m, 5m, 30m, 2h, 6h]
       sent-retention: 30d
       failed-retention: 90d
+    # Emails with secret links (invitation, password reset, email verification) never go through the outbox:
+    # they are sent directly, with these waits between the in-memory attempts (3 attempts)
+    direct-retry-delays: [5s, 30s]
+  messages:
+    # Limits of manual messages to candidates (D7-7); over them → 429 with Retry-After
+    per-sender-hour: 100
+    per-sender-day: 500
+    per-candidate-day: 10
   secrets:
     # AES-256-GCM key of the secrets stored in the database (SMTP passwords): 32 random bytes in base64
     # (openssl rand -base64 32). Only from the environment (.env), never in git.

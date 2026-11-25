@@ -3,7 +3,10 @@ package com.minhaempresa.recrutamentoapi.messaging.controller;
 import com.minhaempresa.recrutamentoapi.messaging.dto.request.MessageTemplateRequest;
 import com.minhaempresa.recrutamentoapi.messaging.dto.response.MessageTemplateResponse;
 import com.minhaempresa.recrutamentoapi.messaging.entity.MessageChannel;
+import com.minhaempresa.recrutamentoapi.messaging.dto.response.MessagePreviewResponse;
+import com.minhaempresa.recrutamentoapi.messaging.service.MessageService;
 import com.minhaempresa.recrutamentoapi.messaging.service.MessageTemplateService;
+import com.minhaempresa.recrutamentoapi.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -28,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MessageTemplateController {
 
     private final MessageTemplateService service;
+    private final MessageService messageService;
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER', 'INTERVIEWER')")
@@ -46,6 +50,17 @@ public class MessageTemplateController {
     @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER')")
     public MessageTemplateResponse update(@PathVariable UUID id, @Valid @RequestBody MessageTemplateRequest request) {
         return service.update(id, request);
+    }
+
+    /**
+     * The template filled for a candidate, before sending ({@code SendMessageDialog}). {@code applicationId}
+     * is accepted from stage 8.
+     */
+    @GetMapping("/{id}/preview")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER')")
+    public MessagePreviewResponse preview(@PathVariable UUID id, @RequestParam UUID candidateId,
+            @RequestParam(required = false) UUID applicationId, AuthenticatedUser actor) {
+        return messageService.preview(id, candidateId, applicationId, actor);
     }
 
     /** Deactivates the template (sent messages keep their reference). */
