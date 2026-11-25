@@ -55,6 +55,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.annotation.CacheEvict;
@@ -141,6 +142,15 @@ public class JobService {
                     job.getRequirements().stream().map(mapper::toRequirementResponse).toList(),
                     job.getScreeningQuestions().stream().map(mapper::toQuestionResponse).toList());
         });
+    }
+
+    /** Titles by job id (missing ids are left out). */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> titlesOf(Collection<UUID> jobIds) {
+        if (jobIds.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(Set.copyOf(jobIds)).stream().collect(Collectors.toMap(Job::getId, Job::getTitle));
     }
 
     /** Ids of the jobs where the user is an interviewer (their candidates are visible to them, D6-1). */

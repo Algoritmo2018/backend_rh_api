@@ -238,8 +238,8 @@ class ApplicationIntegrationTest {
             assertThat(row.get("email")).isEqualTo(email);
             assertThat(row.get("province")).isEqualTo("ZAIRE");
             assertThat(row.get("eliminated")).isEqualTo(false);
-            // CV only: neither NEBOSH nor 3 years in the new profile → 0
-            assertThat(row.get("score")).isEqualTo(0);
+            // CV only, no session: nothing structured to evaluate → no score (never a misleading 0)
+            assertThat(row.get("score")).isNull();
             UUID applicationId = (UUID) row.get("id");
             UUID candidateId = (UUID) row.get("candidate_id");
 
@@ -251,7 +251,7 @@ class ApplicationIntegrationTest {
 
             // Answers (normalized), requirement matches, history
             assertThat(jdbc.queryForObject("SELECT answer FROM application_answers WHERE application_id = ?", String.class, applicationId)).isEqualTo("sim");
-            assertThat(count("SELECT count(*) FROM application_requirement_matches WHERE application_id = ?", applicationId)).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM application_requirement_matches WHERE application_id = ?", applicationId)).isZero();
             assertThat(jdbc.queryForMap("SELECT action, to_stage, by_user_id FROM stage_moves WHERE application_id = ?", applicationId))
                     .containsEntry("action", "APPLIED").containsEntry("to_stage", "NEW").containsEntry("by_user_id", null);
 
@@ -405,6 +405,37 @@ class ApplicationIntegrationTest {
         }
 
         @Test
+        void withoutStructuredDataTheScoreIsNullAndWithDataMeetingNothingItIsZero() throws Exception {
+            OpenJob job = openJob();
+
+            // Anonymous, CV only: nothing to evaluate → null and no matches
+            String cvOnly = TestUsers.uniqueEmail();
+            applyPublic(application(job, cvOnly), SampleFiles.pdf()).andExpect(status().isAccepted());
+            Map<String, Object> noData = applicationRow(job, cvOnly);
+            assertThat(noData.get("score")).isNull();
+            assertThat(count("SELECT count(*) FROM application_requirement_matches WHERE application_id = ?", noData.get("id"))).isZero();
+
+            // Quick profile meeting no requirement (no NEBOSH, 0 years) → evaluated: 0 with every match not met
+            String noMatch = TestUsers.uniqueEmail();
+            Map<String, Object> body = application(job, noMatch);
+            Map<String, Object> quick = quickProfile("Soldadura");
+            quick.put("years", 0);
+            body.put("quickProfile", quick);
+            applyPublic(body, null).andExpect(status().isAccepted());
+            Map<String, Object> evaluated = applicationRow(job, noMatch);
+            assertThat(evaluated.get("score")).isEqualTo(0);
+            assertThat(count("SELECT count(*) FROM application_requirement_matches WHERE application_id = ? AND NOT met", evaluated.get("id"))).isEqualTo(2);
+
+            // Pipeline: score null in JSON and at the end of the list (after the 0)
+            JsonNode pipeline = json(mvc.perform(get("/api/v1/jobs/" + job.id() + "/applications").with(users.bearer(recruiter))).andExpect(status().isOk()));
+            assertThat(pipeline).hasSize(2);
+            assertThat(pipeline.get(0).path("score").asInt()).isZero();
+            assertThat(pipeline.get(0).path("matches")).hasSize(2);
+            assertThat(pipeline.get(1).path("score").isNull()).isTrue();
+            assertThat(pipeline.get(1).path("matches")).isEmpty();
+        }
+
+        @Test
         void anAnonymousApplicationIsScoredOnlyWithWhatItSent() throws Exception {
             // The email belongs to a candidate whose stored profile meets the mandatory NEBOSH requirement
             TestUser owner = candidates.verifiedCandidate();
@@ -412,7 +443,7 @@ class ApplicationIntegrationTest {
             OpenJob job = openJob();
 
             applyPublic(application(job, owner.email()), SampleFiles.pdf()).andExpect(status().isAccepted());
-            assertThat(applicationRow(job, owner.email()).get("score")).as("CV only: the stored profile does not count").isEqualTo(0);
+            assertThat(applicationRow(job, owner.email()).get("score")).as("CV only: the stored profile does not count").isNull();
 
             OpenJob second = openJob();
             Map<String, Object> withQuick = application(second, owner.email());

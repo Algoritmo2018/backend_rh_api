@@ -77,9 +77,13 @@ public class Application extends UserAuditableEntity {
     @Embedded
     private QuickProfile quickProfile;
 
+    /**
+     * Match score 0–100; {@code null} = nothing structured to evaluate (anonymous application with a CV only).
+     * 0 = evaluated and no requirement met.
+     */
     @Setter(AccessLevel.NONE)
-    @Column(name = "score", nullable = false, updatable = false)
-    private int score;
+    @Column(name = "score", updatable = false)
+    private Integer score;
 
     @Setter(AccessLevel.NONE)
     @Column(name = "eliminated", nullable = false, updatable = false)
@@ -150,7 +154,7 @@ public class Application extends UserAuditableEntity {
     @Column(name = "tag_id", nullable = false)
     private Set<UUID> tagIds = new LinkedHashSet<>();
 
-    public Application(UUID jobId, UUID candidateId, PipelineStageKey stage, CandidateSource source, int score, boolean eliminated, Instant appliedAt) {
+    public Application(UUID jobId, UUID candidateId, PipelineStageKey stage, CandidateSource source, Integer score, boolean eliminated, Instant appliedAt) {
         this.jobId = jobId;
         this.candidateId = candidateId;
         this.stage = stage;
@@ -159,6 +163,43 @@ public class Application extends UserAuditableEntity {
         this.eliminated = eliminated;
         this.appliedAt = appliedAt;
         this.stageEnteredAt = appliedAt;
+    }
+
+    /** Still in the process (in progress or hired): may be moved and rejected. */
+    public boolean inProcess() {
+        return status == ApplicationStatus.ACTIVE || status == ApplicationStatus.HIRED;
+    }
+
+    /**
+     * Moves to another stage (frontend {@code moveApplication}): the final stage makes it hired (D8-6), any other
+     * stage in progress; entering the client interview marks it shared with the client and approved.
+     */
+    public void moveTo(PipelineStageKey target, Instant now) {
+        stage = target;
+        stageEnteredAt = now;
+        status = target == PipelineStageKey.HIRED ? ApplicationStatus.HIRED : ApplicationStatus.ACTIVE;
+        if (target == PipelineStageKey.CLIENT_INTERVIEW && !sharedWithClient) {
+            sharedWithClient = true;
+            sharedAt = now;
+            clientDecision = ClientDecision.APPROVED;
+        }
+    }
+
+    public void reject(UUID reasonId, String note, UUID byUserId, Instant now) {
+        status = ApplicationStatus.REJECTED;
+        rejectionReasonId = reasonId;
+        rejectionNote = note;
+        rejectedAt = now;
+        rejectedBy = byUserId;
+    }
+
+    /** Back to the pipeline, in the stage where it was (hired again when that stage is the final one). */
+    public void restore() {
+        status = stage == PipelineStageKey.HIRED ? ApplicationStatus.HIRED : ApplicationStatus.ACTIVE;
+        rejectionReasonId = null;
+        rejectionNote = null;
+        rejectedAt = null;
+        rejectedBy = null;
     }
 
     /**

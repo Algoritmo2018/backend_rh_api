@@ -51,6 +51,12 @@ public class MessageTemplateService {
         return repository.findById(id).filter(MessageTemplate::isActive).map(mapper::toResponse);
     }
 
+    /** Active template by its stable code (e.g. the system template {@code rejection-email}). */
+    @Transactional(readOnly = true)
+    public Optional<MessageTemplateResponse> findActiveByCode(String code) {
+        return repository.findByCode(code).filter(MessageTemplate::isActive).map(mapper::toResponse);
+    }
+
     @Transactional
     @CacheEvict(cacheNames = {CacheNames.MESSAGE_TEMPLATES, CacheNames.PIPELINE_STAGES}, allEntries = true)
     public MessageTemplateResponse create(MessageTemplateRequest request) {

@@ -12,7 +12,9 @@ import java.util.UUID;
  * With a {@code body}, it is sent as written (the template is only recorded as its source), so the
  * recruiter may edit a template before sending. Variables ({@code {{nome}}}…) are filled in both cases.
  *
- * @param applicationId must be {@code null} until applications exist (stage 8)
+ * @param applicationId the application the message is about (it must belong to the candidate): gives the consent to
+ *     contact them and the variables {@code {{vaga}}} and {@code {{empresa}}}; without it the candidate must be in the
+ *     talent pool
  * @param marketing a marketing communication: the candidate must have accepted marketing
  */
 public record MessageSendRequest(

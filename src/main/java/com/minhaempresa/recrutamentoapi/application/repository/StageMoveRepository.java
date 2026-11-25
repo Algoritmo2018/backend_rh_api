@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface StageMoveRepository extends JpaRepository<StageMove, UUID> {
 
+    /** History of an application, the newest first (UUID v7 ids break ties of the same instant). */
     List<StageMove> findByApplicationIdOrderByCreatedAtDescIdDesc(UUID applicationId);
 
     /** Erasure: notes and reasons may hold personal data. */

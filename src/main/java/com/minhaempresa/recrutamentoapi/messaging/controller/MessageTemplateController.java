@@ -53,8 +53,8 @@ public class MessageTemplateController {
     }
 
     /**
-     * The template filled for a candidate, before sending ({@code SendMessageDialog}). {@code applicationId}
-     * is accepted from stage 8.
+     * The template filled for a candidate, before sending ({@code SendMessageDialog}). With {@code applicationId}
+     * (of this candidate) the job variables are filled too.
      */
     @GetMapping("/{id}/preview")
     @PreAuthorize("hasAnyRole('ADMIN', 'RECRUITER')")

@@ -134,6 +134,10 @@ app:
     rate-limits:
       per-ip: { max: 60, window: 1h }
       per-email: { max: 10, window: 1h }
+    # Pipeline bulk actions (more than one application/candidate per request): items per action, actions per user per day
+    bulk:
+      max-items: 50
+      max-actions-per-day: 20
   contact:
     # Public forms "Precisa de recrutar?" and Contacto (CGNAT: per-IP generous, per-email strict)
     rate-limits:

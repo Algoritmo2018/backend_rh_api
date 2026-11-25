@@ -18,6 +18,27 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
 
     List<Application> findByCandidateId(UUID candidateId);
 
+    /** Applications of a candidate, the newest first (candidate profile). */
+    List<Application> findByCandidateIdOrderByAppliedAtDesc(UUID candidateId);
+
+    /** Pipeline of a job (rejected ones included): best score first, applications without a score at the end. */
+    @Query("SELECT a FROM Application a WHERE a.jobId = :jobId ORDER BY a.score DESC NULLS LAST, a.appliedAt ASC, a.id ASC")
+    List<Application> findPipeline(@Param("jobId") UUID jobId);
+
+    /** Candidates (of the given ones) that already have an application to the job. */
+    @Query("SELECT a.candidateId FROM Application a WHERE a.jobId = :jobId AND a.candidateId IN :candidateIds")
+    List<UUID> findCandidateIdsWithApplication(@Param("jobId") UUID jobId, @Param("candidateIds") Collection<UUID> candidateIds);
+
+    /** Tag usage (settings screen). */
+    @Query("SELECT t AS tagId, COUNT(a) AS total FROM Application a JOIN a.tagIds t GROUP BY t")
+    List<TagCount> countByTag();
+
+    interface TagCount {
+        UUID getTagId();
+
+        long getTotal();
+    }
+
     /** Applications per job, stage and status (job list counts). */
     @Query("""
             SELECT a.jobId AS jobId, a.stage AS stage, a.status AS status, COUNT(a) AS total

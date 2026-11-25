@@ -78,7 +78,9 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>Consents: job application (with the text version in force) and, when asked, talent pool.
  *   <li>Score and requirement matches computed once (D8-3): logged-in candidate = stored profile + quick profile and
  *       province sent; anonymous form = ONLY the quick profile and province sent (never the stored profile of the
- *       email owner). The "already applied" email goes at most once per day per (email, job).
+ *       email owner); anonymous with a CV only = nothing structured to evaluate: {@code score} null and no matches
+ *       (0 means evaluated with no requirement met). The "already applied" email goes at most once per day per
+ *       (email, job).
  *   <li>{@code eliminated} from the eliminatory questions, never shown to the candidate.
  *   <li>After the commit: the automatic action of the "Nova" stage; in the transaction: the bell of the job's
  *       recruiter (D8-4).
@@ -201,8 +203,10 @@ public class ApplicationService {
                 : applicant.profileCvId();
         consentService.recordApplicationConsents(applicant.candidateId(), job.id(), talentPool);
 
-        MatchResultResponse match = matchScorer.score(job.requirements(), matchProfile(applicant, quick));
-        Application application = new Application(job.id(), applicant.candidateId(), PipelineStageKey.NEW, source, match.score(), answers.eliminated(), now);
+        // Nothing structured to evaluate (anonymous, CV only): no score and no matches, never a misleading 0
+        MatchResultResponse match = applicant.loggedIn() || quick != null ? matchScorer.score(job.requirements(), matchProfile(applicant, quick)) : null;
+        Application application = new Application(job.id(), applicant.candidateId(), PipelineStageKey.NEW, source,
+                match == null ? null : match.score(), answers.eliminated(), now);
         application.setFullName(applicant.fullName());
         application.setEmail(applicant.email());
         application.setPhone(applicant.phone());
@@ -210,7 +214,9 @@ public class ApplicationService {
         application.setCvDocumentId(cvId);
         application.setQuickProfile(toQuickProfile(quick));
         application.getAnswers().addAll(answers.answers());
-        match.matches().forEach(m -> application.getMatches().add(new RequirementMatchEntry(m.requirementId(), m.met(), m.detail())));
+        if (match != null) {
+            match.matches().forEach(m -> application.getMatches().add(new RequirementMatchEntry(m.requirementId(), m.met(), m.detail())));
+        }
         try {
             repository.saveAndFlush(application);
         } catch (DataIntegrityViolationException e) {

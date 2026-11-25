@@ -15,6 +15,7 @@ import com.minhaempresa.recrutamentoapi.candidate.entity.Education;
 import com.minhaempresa.recrutamentoapi.candidate.entity.LanguageLevel;
 import com.minhaempresa.recrutamentoapi.candidate.entity.WorkExperience;
 import com.minhaempresa.recrutamentoapi.candidate.mapper.CandidateMapper;
+import com.minhaempresa.recrutamentoapi.candidate.mapper.DocumentUrls;
 import com.minhaempresa.recrutamentoapi.candidate.dto.response.DocumentResponse;
 import com.minhaempresa.recrutamentoapi.candidate.repository.CandidateRepository;
 import com.minhaempresa.recrutamentoapi.candidate.repository.DocumentRepository;
@@ -54,6 +55,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +78,7 @@ public class CandidateService {
     private final CandidateMapper mapper;
     private final UserService userService;
     private final CandidateAccessPolicy accessPolicy;
+    private final ObjectProvider<CandidateApplicationsProvider> applicationsProvider;
     private final MatchScorer matchScorer;
     private final AppProperties appProperties;
     private final Clock clock;
@@ -197,7 +200,9 @@ public class CandidateService {
         DocumentResponse cv = entity.getCvDocumentId() == null
                 ? null
                 : documentRepository.findById(entity.getCvDocumentId()).map(mapper::toDocumentResponse).orElse(null);
-        return new CandidateProfileResponse(restricted ? candidate.withoutPrivateData() : candidate, cv, List.of(), restricted);
+        CandidateApplicationsProvider provider = applicationsProvider.getIfAvailable();
+        List<?> applications = provider == null ? List.of() : provider.applicationsOf(id, viewer);
+        return new CandidateProfileResponse(restricted ? candidate.withoutPrivateData() : candidate, cv, applications, restricted);
     }
 
     /** Top-bar search: name, headline, email or phone. Interviewers only find their candidates. */
@@ -288,6 +293,27 @@ public class CandidateService {
     @Transactional(readOnly = true)
     public MatchProfile matchProfileOf(UUID candidateId) {
         return matchProfile(find(candidateId));
+    }
+
+    /**
+     * A talent-pool candidate added to a job by a recruiter (stage 8b): the application copies the profile's
+     * name, email, phone, province and current CV.
+     */
+    @Transactional(readOnly = true)
+    public ApplicantProfile applicantOf(UUID candidateId) {
+        Candidate candidate = find(candidateId);
+        return new ApplicantProfile(candidate.getId(), candidate.getFullName(), candidate.getEmail(), candidate.getPhone(),
+                candidate.getProvince(), candidate.getCvDocumentId());
+    }
+
+    /** Profile data of the pipeline cards, by id (missing ids are left out). */
+    @Transactional(readOnly = true)
+    public Map<UUID, CandidateCard> cardsOf(Collection<UUID> candidateIds) {
+        if (candidateIds.isEmpty()) {
+            return Map.of();
+        }
+        return repository.findAllById(Set.copyOf(candidateIds)).stream().collect(Collectors.toMap(Candidate::getId,
+                c -> new CandidateCard(c.getId(), DocumentUrls.inline(c.getPhotoDocumentId()), c.getCity(), c.getHeadline(), c.getTotalExperienceYears())));
     }
 
     /** Whether the candidate is linked to a portal account (an account email cannot be an anonymous applicant's). */

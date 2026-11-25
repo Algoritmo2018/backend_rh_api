@@ -43,6 +43,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -107,7 +108,6 @@ public class MessageService {
     /** A message written (or chosen) by a recruiter. */
     @Transactional
     public MessageResponse send(MessageSendRequest request, AuthenticatedUser actor) {
-        requireNoApplication(request.applicationId());
         MessageTemplate template = request.templateId() == null ? null : activeTemplate(request.templateId());
         if (template != null && template.getChannel() != request.channel()) {
             throw new BusinessException("message.template.channel-mismatch", List.of(new FieldError("templateId", "message.template.channel-mismatch")));
@@ -132,9 +132,11 @@ public class MessageService {
         }
         boolean marketing = Boolean.TRUE.equals(request.marketing());
         CandidateContact candidate = candidateService.getContact(request.candidateId());
-        requireConsent(candidate.id(), null, marketing);
+        Map<TemplateVariable, String> jobValues = applicationValues(request.applicationId(), candidate.id());
+        requireConsent(candidate.id(), request.applicationId(), marketing);
         checkLimits(actor.id(), candidate.id());
-        return deliver(candidate, null, request.channel(), subject, body, template, marketing, actor.id(), false, userService.getById(actor.id()).name(), Map.of());
+        return deliver(candidate, request.applicationId(), request.channel(), subject, body, template, marketing, actor.id(), false,
+                userService.getById(actor.id()).name(), jobValues);
     }
 
     /**
@@ -157,11 +159,7 @@ public class MessageService {
         MessageTemplate template = activeTemplate(templateId);
         CandidateContact candidate = candidateService.getContact(candidateId);
         Map<TemplateVariable, String> values = new EnumMap<>(TemplateVariable.class);
-        if (applicationId != null) {
-            ApplicationRef application = applicationOf(applicationId, candidate.id());
-            values.put(TemplateVariable.JOB_TITLE, application.jobTitle());
-            values.put(TemplateVariable.COMPANY, application.companyName());
-        }
+        values.putAll(applicationValues(applicationId, candidate.id()));
         values.putAll(extraValues);
         requireConsent(candidate.id(), applicationId, false);
         if (sentBy != null && !automatic) {
@@ -176,10 +174,10 @@ public class MessageService {
     /** Fills the template for one candidate without sending it (variables without a value stay visible). */
     @Transactional(readOnly = true)
     public MessagePreviewResponse preview(UUID templateId, UUID candidateId, UUID applicationId, AuthenticatedUser actor) {
-        requireNoApplication(applicationId);
         MessageTemplate template = templates.findById(templateId).filter(MessageTemplate::isActive)
                 .orElseThrow(() -> new NotFoundException("template.not-found"));
-        Map<TemplateVariable, String> values = values(candidateService.getContact(candidateId), userService.getById(actor.id()).name(), Map.of());
+        CandidateContact candidate = candidateService.getContact(candidateId);
+        Map<TemplateVariable, String> values = values(candidate, userService.getById(actor.id()).name(), applicationValues(applicationId, candidate.id()));
         String subject = template.getSubject() == null ? null : MailHeaders.clean(templateRenderer.renderText(template.getSubject(), values));
         return new MessagePreviewResponse(template.getChannel(), subject, templateRenderer.renderText(template.getBody(), values));
     }
@@ -298,11 +296,19 @@ public class MessageService {
                 .orElseThrow(() -> new BusinessException("message.application.invalid", List.of(new FieldError("applicationId", "message.application.invalid"))));
     }
 
-    /** Recruiters link messages to applications from stage 8b ({@code POST /messages}, preview). */
-    private static void requireNoApplication(UUID applicationId) {
-        if (applicationId != null) {
-            throw new BusinessException("message.application.unavailable", List.of(new FieldError("applicationId", "message.application.unavailable")));
+    /**
+     * Job variables of a message about an application ({{vaga}}, {{empresa}}: the neutral text for a confidential
+     * job); empty without an application. The application must belong to the candidate (422 otherwise).
+     */
+    private Map<TemplateVariable, String> applicationValues(UUID applicationId, UUID candidateId) {
+        if (applicationId == null) {
+            return Map.of();
         }
+        ApplicationRef application = applicationOf(applicationId, candidateId);
+        Map<TemplateVariable, String> values = new EnumMap<>(TemplateVariable.class);
+        values.put(TemplateVariable.JOB_TITLE, application.jobTitle());
+        values.put(TemplateVariable.COMPANY, application.companyName());
+        return values;
     }
 
     /**
@@ -340,17 +346,22 @@ public class MessageService {
         throw new TooManyRequestsException(key, retryAfter.isNegative() || retryAfter.isZero() ? Duration.ofSeconds(1) : retryAfter);
     }
 
-    /** Adds candidate and sender names to a list of messages (two queries for the whole page). */
+    /** Adds candidate and sender names and the job title of the application to a list of messages (one query each for the whole page). */
     private Function<Message, MessageWithRefsResponse> withRefs(Collection<Message> page) {
         Map<UUID, CandidateContact> candidates = candidateService.contactsOf(page.stream().map(Message::getCandidateId).distinct().toList());
         Map<UUID, UserReference> senders = userService.referencesOf(page.stream().map(Message::getSentBy).filter(Objects::nonNull).distinct().toList());
+        List<UUID> applicationIds = page.stream().map(Message::getApplicationId).filter(Objects::nonNull).distinct().toList();
+        Map<UUID, String> jobTitles = new HashMap<>();
+        if (!applicationIds.isEmpty()) {
+            applicationDirectory.orderedStream().forEach(directory -> jobTitles.putAll(directory.jobTitlesOf(applicationIds)));
+        }
         return message -> {
             CandidateContact candidate = candidates.get(message.getCandidateId());
             UserReference sender = message.getSentBy() == null ? null : senders.get(message.getSentBy());
             return MessageWithRefsResponse.of(mapper.toResponse(message),
                     candidate == null ? null : candidate.fullName(),
                     candidate != null && candidate.hasWhatsapp(),
-                    null,
+                    message.getApplicationId() == null ? null : jobTitles.get(message.getApplicationId()),
                     sender == null ? null : sender.name());
         };
     }

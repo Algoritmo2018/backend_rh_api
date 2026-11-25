@@ -1,5 +1,7 @@
 package com.minhaempresa.recrutamentoapi.messaging.service;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -11,6 +13,9 @@ import java.util.UUID;
 public interface MessageApplicationDirectory {
 
     Optional<ApplicationRef> find(UUID applicationId);
+
+    /** Job title of each application (inbox lists); missing ids are left out. */
+    Map<UUID, String> jobTitlesOf(Collection<UUID> applicationIds);
 
     /**
      * @param companyName the client name, or the neutral text of a confidential job (never the real name)
