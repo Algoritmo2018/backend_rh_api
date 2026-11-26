@@ -1,0 +1,103 @@
+# Local staging: the whole system in containers, one command (deploy/staging.ps1 up). See deploy/README.md.
+# Values come from deploy/.env.staging (git-ignored, created by "staging.ps1 init"); nothing secret in this file.
+# Every published port is bound to 127.0.0.1 by default: the application opens to the network only with
+# WEB_BIND=0.0.0.0; Mailpit holds invitation and password-reset links, the database and MinIO hold personal data.
+name: recrutamento-staging
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-recrutamento}
+      POSTGRES_USER: ${POSTGRES_USER:-recrutamento}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deploy/staging.ps1 init (POSTGRES_PASSWORD missing)}
+    ports:
+      - "127.0.0.1:${STAGING_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Same MinIO build as dev (Chainguard, pinned by digest). Private bucket created by the backend, encrypted
+  # (SSE-S3). The image has no shell tools for a health check: the backend restarts until MinIO answers.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:f2e56aceb4d38ad9b05c901270946e2353b19f86ba4396f25cf75b15b455b38c
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-recrutamento}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run deploy/staging.ps1 init (MINIO_ROOT_PASSWORD missing)}
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?Run deploy/staging.ps1 init (MINIO_KMS_SECRET_KEY missing)}
+    ports:
+      - "127.0.0.1:${STAGING_MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  # Every email sent (invitations, password reset, confirmations, alerts). Inbox kept only while running.
+  mailpit:
+    image: axllent/mailpit:v1.34
+    ports:
+      - "127.0.0.1:${STAGING_MAILPIT_PORT:-8026}:8025"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+    image: recrutamento-api:staging
+    environment:
+      # "staging,devseed" = with the development accounts (dev/README.md); "staging" = empty database with the
+      # bootstrap administrator (invitation in Mailpit). Changing it on an existing database needs "staging.ps1 reset".
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-staging,devseed}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-recrutamento}
+      DB_USERNAME: ${POSTGRES_USER:-recrutamento}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      MAIL_HOST: mailpit
+      MAIL_PORT: "1025"
+      APP_MAIL_FROM: FEH OIRAM <nao-responder@fehoiram.local>
+      APP_FRONTEND_URL: http://localhost:${STAGING_HTTP_PORT:-8088}/software_rh
+      APP_CANDIDATE_PORTAL_URL: http://localhost:${STAGING_HTTP_PORT:-8088}/software_rh/candidato
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:${STAGING_HTTP_PORT:-8088}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?Run deploy/staging.ps1 init (APP_JWT_SECRET missing)}
+      APP_AUTH_TOKEN_PEPPER: ${APP_AUTH_TOKEN_PEPPER:?Run deploy/staging.ps1 init (APP_AUTH_TOKEN_PEPPER missing)}
+      APP_SECRETS_KEY: ${APP_SECRETS_KEY:?Run deploy/staging.ps1 init (APP_SECRETS_KEY missing)}
+      APP_STORAGE_S3_ENDPOINT: http://minio:9000
+      APP_STORAGE_S3_BUCKET: recrutamento-files
+      # Locally the MinIO root account; on a server, dedicated keys with access to the bucket only
+      APP_STORAGE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-recrutamento}
+      APP_STORAGE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      TZ: UTC
+    volumes:
+      # Read only, never copied into the image; used only with the devseed profile
+      - ../dev/seed:/app/dev/seed:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      mailpit:
+        condition: service_started
+    # No published port: only the Nginx of "web" reaches it (it trusts X-Forwarded-For)
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../../Front_RH
+    image: recrutamento-web:staging
+    environment:
+      API_UPSTREAM: http://backend:8080
+    ports:
+      # 127.0.0.1 by default; WEB_BIND=0.0.0.0 in .env.staging opens it to the local network (see README: with the
+      # dev seed on, anyone on that network can log in with the test accounts)
+      - "${WEB_BIND:-127.0.0.1}:${STAGING_HTTP_PORT:-8088}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:

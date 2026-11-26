@@ -1,0 +1,13 @@
+# Never in the build context: secrets, the dev seed (mounted at runtime only), build output, local data
+.env
+.env.*
+!.env.example
+dev/
+deploy/
+data/
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+HELP.md

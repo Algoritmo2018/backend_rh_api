@@ -1,0 +1,11 @@
+# Development data (dev/seed, accounts with a known password; see dev/README.md). Add this profile to another one
+# (e.g. SPRING_PROFILES_ACTIVE=staging,devseed) to load the seed. The path is relative to the working directory:
+# the backend folder in dev, /app in the Docker image (the folder is mounted read-only, never copied into the image).
+# DevSeedGuard refuses it with the prod profile or a non-local app.frontend-url (unless APP_DEVSEED_ALLOW_REMOTE=true).
+spring:
+  flyway:
+    locations: classpath:db/migration,filesystem:dev/seed
+
+app:
+  devseed:
+    allow-remote: ${APP_DEVSEED_ALLOW_REMOTE:false}

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -23,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * database of the other integration tests.
  */
 @IntegrationTest
+// The devseed profile (as in staging) also wires DevSeedGuard; the locations keep the test-only migrations
+@ActiveProfiles({"test", "devseed"})
 @TestPropertySource(properties = "spring.flyway.locations=classpath:db/migration,classpath:db/test-migration,filesystem:dev/seed")
 class DevSeedMigrationTest {
 

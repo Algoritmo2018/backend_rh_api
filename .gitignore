@@ -43,3 +43,6 @@ Thumbs.db
 *.log
 ### Local uploads (dev) ###
 /data/
+
+# Local staging secrets (deploy/staging.ps1 init)
+deploy/.env.staging

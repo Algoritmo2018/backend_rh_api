@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
@@ -13,13 +12,14 @@ import org.springframework.core.io.ClassPathResource;
 
 /**
  * The development seed ({@code dev/seed}, users with a known password) must never reach production: only
- * {@code application-dev.yml} may list it in the Flyway locations (integration plan I1, adjustment A1).
+ * {@code application-dev.yml} and {@code application-devseed.yml} may list it in the Flyway locations (integration
+ * plan I1, adjustment A1; the staging profile loads it only through devseed).
  */
 class DevSeedLocationsTest {
 
     @ParameterizedTest
-    @ValueSource(strings = {"application.yml", "application-prod.yml"})
-    void baseAndProductionConfigurationNeverLoadTheDevSeed(String file) {
+    @ValueSource(strings = {"application.yml", "application-prod.yml", "application-staging.yml"})
+    void baseProductionAndStagingConfigurationNeverLoadTheDevSeed(String file) {
         Map<String, String> locations = flywayLocations(file);
 
         assertThat(locations.values())
@@ -27,10 +27,10 @@ class DevSeedLocationsTest {
                 .noneMatch(value -> value.replace('\\', '/').contains("dev/seed"));
     }
 
-    @Test
-    void onlyTheDevProfileLoadsTheSeed() {
-        assertThat(flywayLocations("application-dev.yml").values())
-                .anyMatch(value -> value.contains("filesystem:dev/seed"));
+    @ParameterizedTest
+    @ValueSource(strings = {"application-dev.yml", "application-devseed.yml"})
+    void onlyTheDevAndDevseedProfilesLoadTheSeed(String file) {
+        assertThat(flywayLocations(file).values()).anyMatch(value -> value.contains("filesystem:dev/seed"));
     }
 
     /** Every {@code spring.flyway.locations} entry (comma-separated string or YAML list) of a config file. */
