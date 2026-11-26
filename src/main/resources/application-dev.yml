@@ -13,6 +13,10 @@ spring:
     # Mailpit (docker compose): web inbox at http://localhost:8025
     host: localhost
     port: 1025
+  flyway:
+    # Development data (dev/seed, outside the jar; see dev/README.md). Only this profile lists it: never add
+    # it to application.yml or application-prod.yml (DevSeedLocationsTest fails).
+    locations: classpath:db/migration,filesystem:dev/seed
 
 springdoc:
   api-docs:

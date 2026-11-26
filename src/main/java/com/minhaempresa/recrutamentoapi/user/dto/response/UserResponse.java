@@ -6,7 +6,8 @@ import java.util.UUID;
 
 /**
  * User as the frontend type {@code User} ({@code types/user.ts}), plus {@code active} and
- * {@code emailVerified}.
+ * {@code emailVerified} and {@code invitationPending} (a staff or client user who never accepted the invitation,
+ * still valid or expired: the users screen offers "Reenviar convite").
  */
 public record UserResponse(
         UUID id,
@@ -21,4 +22,5 @@ public record UserResponse(
         boolean twoFactorEnabled,
         boolean active,
         boolean emailVerified,
+        boolean invitationPending,
         Instant createdAt) {}

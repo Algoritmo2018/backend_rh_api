@@ -76,7 +76,8 @@ class InvitationIntegrationTest {
                         "name", "Paulo Lukamba", "email", email, "phone", TestUsers.uniqueLocalPhone(), "role", "recruiter", "jobTitle", "Recrutador"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").value("recruiter"))
-                .andExpect(jsonPath("$.emailVerified").value(false));
+                .andExpect(jsonPath("$.emailVerified").value(false))
+                .andExpect(jsonPath("$.invitationPending").value(true));
 
         Email invitation = mailpit.awaitEmailTo(email);
         assertThat(invitation.subject()).isEqualTo("Convite para o portal de recrutamento FEH OIRAM");
@@ -87,6 +88,7 @@ class InvitationIntegrationTest {
         assertThat(session.status()).isEqualTo(200);
         assertThat(session.refreshToken()).isNotBlank();
         assertThat(session.body().path("user").path("emailVerified").asBoolean()).isTrue();
+        assertThat(session.body().path("user").path("invitationPending").asBoolean()).isFalse();
         assertThat(api.login(email, "Convidado2026").status()).isEqualTo(200);
         assertThat(api.postForSession("/api/v1/auth/invitations/accept", Map.of("token", invitation.token(), "password", "Outra2026x")).status())
                 .as("single use").isEqualTo(422);
